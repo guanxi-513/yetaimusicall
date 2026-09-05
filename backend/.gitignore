@@ -1,0 +1,14 @@
+# 依赖
+node_modules/
+
+# 运行数据与敏感文件（登录态 / cookie / 日志）
+cookie.txt
+.bili_cookies.txt
+.npmrc
+*.log
+
+# 系统/编辑器
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

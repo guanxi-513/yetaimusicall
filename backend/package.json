@@ -1,0 +1,14 @@
+{
+  "name": "netease-music-source",
+  "version": "1.0.0",
+  "description": "独立网易云音乐音源模块（个人学习用途）：搜索 / 播放地址 / 歌词 / 歌曲详情 / 歌单 的轻量 HTTP 服务",
+  "main": "server.js",
+  "private": true,
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@neteasecloudmusicapienhanced/api": "^4.36.1",
+    "@unblockneteasemusic/server": "^0.28.0"
+  }
+}

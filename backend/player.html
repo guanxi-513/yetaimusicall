@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>网易云音源 · 网页播放器 Demo</title>
+<style>
+  :root {
+    --bg: #0f1020;
+    --panel: #191a30;
+    --panel2: #232448;
+    --accent: #e2455f;
+    --accent2: #8f5bff;
+    --text: #eef0ff;
+    --muted: #8b8daa;
+    --border: rgba(255,255,255,.08);
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    font-family: "PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+    background: radial-gradient(1200px 600px at 20% -10%, #2a2350 0%, var(--bg) 55%);
+    color: var(--text);
+    min-height:100vh;
+    display:flex;
+    justify-content:center;
+    padding:28px 16px;
+  }
+  .wrap { width:100%; max-width:980px; display:flex; flex-direction:column; gap:18px; }
+  header h1 { font-size:22px; letter-spacing:.5px; }
+  header p { color:var(--muted); font-size:13px; margin-top:6px; }
+  .searchbar { display:flex; gap:10px; }
+  .searchbar input {
+    flex:1; background:var(--panel); border:1px solid var(--border);
+    border-radius:12px; padding:13px 16px; color:var(--text); font-size:15px; outline:none;
+  }
+  .searchbar input:focus { border-color:var(--accent); }
+  .searchbar button {
+    background:linear-gradient(135deg,var(--accent),var(--accent2));
+    border:none; color:#fff; font-size:15px; padding:0 26px; border-radius:12px; cursor:pointer; font-weight:600;
+  }
+  .searchbar button:active { transform:scale(.97); }
+  .main { display:grid; grid-template-columns: 1.2fr 1fr; gap:18px; align-items:start; }
+  @media (max-width:760px){ .main{ grid-template-columns:1fr; } }
+  .card { background:var(--panel); border:1px solid var(--border); border-radius:16px; padding:16px; }
+  .card h2 { font-size:14px; color:var(--muted); font-weight:500; margin-bottom:12px; letter-spacing:1px; }
+  /* 搜索结果 */
+  .tracklist { display:flex; flex-direction:column; gap:4px; max-height:520px; overflow:auto; }
+  .tracklist::-webkit-scrollbar{ width:6px; } .tracklist::-webkit-scrollbar-thumb{ background:var(--border); border-radius:3px; }
+  .track {
+    display:flex; align-items:center; gap:12px; padding:9px 10px; border-radius:10px; cursor:pointer; transition:background .15s;
+  }
+  .track:hover { background:var(--panel2); }
+  .track.playing { background:var(--panel2); }
+  .track .idx { width:22px; color:var(--muted); font-size:12px; text-align:center; flex:none; }
+  .track.playing .idx { color:var(--accent); }
+  .track .cover { width:42px; height:42px; border-radius:8px; object-fit:cover; background:var(--panel2); flex:none; }
+  .track .meta { flex:1; min-width:0; }
+  .track .meta .name { font-size:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .track .meta .artist { font-size:12px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:2px; }
+  .track .play { flex:none; color:var(--accent); font-size:18px; width:26px; text-align:center; }
+  .empty { color:var(--muted); font-size:13px; text-align:center; padding:40px 0; }
+  /* 播放器 */
+  .player { display:flex; flex-direction:column; gap:14px; }
+  .now { display:flex; gap:16px; align-items:center; }
+  .now img { width:96px; height:96px; border-radius:14px; object-fit:cover; box-shadow:0 8px 24px rgba(0,0,0,.4); }
+  .now .info .t { font-size:18px; font-weight:600; }
+  .now .info .a { color:var(--muted); font-size:13px; margin-top:6px; }
+  .now .info .src { font-size:12px; color:var(--accent2); margin-top:8px; }
+  .controls { display:flex; align-items:center; justify-content:center; gap:20px; }
+  .btn {
+    width:44px; height:44px; border-radius:50%; border:1px solid var(--border); background:var(--panel2);
+    color:var(--text); cursor:pointer; font-size:16px; display:flex; align-items:center; justify-content:center; transition:.15s;
+  }
+  .btn:hover { border-color:var(--accent); }
+  .btn.main { width:56px; height:56px; background:linear-gradient(135deg,var(--accent),var(--accent2)); border:none; font-size:20px; }
+  .progress { display:flex; align-items:center; gap:10px; font-size:12px; color:var(--muted); }
+  .bar { flex:1; height:5px; background:var(--panel2); border-radius:3px; cursor:pointer; position:relative; }
+  .bar .fill { height:100%; width:0%; background:linear-gradient(90deg,var(--accent),var(--accent2)); border-radius:3px; }
+  /* 歌词 */
+  .lyrics { max-height:400px; overflow:auto; line-height:2; padding:6px 2px; }
+  .lyrics::-webkit-scrollbar{ width:6px; } .lyrics::-webkit-scrollbar-thumb{ background:var(--border); border-radius:3px; }
+  .lyric-line { font-size:15px; color:var(--muted); transition:color .2s, transform .2s; }
+  .lyric-line.active { color:#fff; font-weight:600; }
+  .toast {
+    position:fixed; top:20px; left:50%; transform:translateX(-50%);
+    background:var(--panel2); border:1px solid var(--border); padding:10px 20px; border-radius:10px;
+    font-size:13px; opacity:0; pointer-events:none; transition:opacity .3s; z-index:99;
+  }
+  .toast.show { opacity:1; }
+  .hint { font-size:12px; color:var(--muted); text-align:center; margin-top:8px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>网易云音源 · 网页播放器</h1>
+    <p>基于本地音源服务 http://localhost:41831（需先启动 netease-music-source）</p>
+  </header>
+
+  <div class="searchbar">
+    <input id="kw" type="text" placeholder="搜索歌曲，如：周杰伦 / 会呼吸的痛" value="会呼吸的痛">
+    <button id="btnSearch">搜索</button>
+  </div>
+
+  <div class="main">
+    <div class="card">
+      <h2>搜索结果</h2>
+      <div class="tracklist" id="tracklist"><div class="empty">输入关键词搜索，点击歌曲即可播放</div></div>
+    </div>
+
+    <div class="card">
+      <h2>正在播放</h2>
+      <div class="player">
+        <div class="now">
+          <img id="cover" src="" alt="封面">
+          <div class="info">
+            <div class="t" id="songName">—</div>
+            <div class="a" id="songArtist">—</div>
+            <div class="src" id="songSrc">未播放</div>
+          </div>
+        </div>
+        <div class="controls">
+          <button class="btn" id="btnPrev" title="上一首">⏮</button>
+          <button class="btn main" id="btnPlay" title="播放/暂停">▶</button>
+          <button class="btn" id="btnNext" title="下一首">⏭</button>
+        </div>
+        <div class="progress">
+          <span id="cur">0:00</span>
+          <div class="bar" id="bar"><div class="fill" id="fill"></div></div>
+          <span id="dur">0:00</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>歌词</h2>
+    <div class="lyrics" id="lyrics"><div class="empty">播放后显示歌词</div></div>
+  </div>
+
+  <div class="hint">提示：部分歌曲 / 高音质需要登录（音源服务接口 /login/qr 支持二维码登录，登录后自动生效）</div>
+</div>
+<div class="toast" id="toast"></div>
+
+<audio id="audio"></audio>
+
+<script>
+const API = location.origin || 'http://localhost:41831';
+const $ = (s) => document.querySelector(s);
+
+// ---- 状态 ----
+let queue = [];          // 当前队列（搜索结果）
+let idx = -1;            // 当前播放下标
+let lrc = [];            // 解析后的歌词 [{time, text}]
+let playing = false;
+
+// ---- 音源服务调用 ----
+async function api(path) {
+  const res = await fetch(API + path);
+  if (!res.ok) throw new Error('服务返回 ' + res.status);
+  return res.json();
+}
+async function search(kw) {
+  return api('/search?keywords=' + encodeURIComponent(kw) + '&limit=20');
+}
+async function songUrl(id) { return api('/song/url?id=' + id); }
+async function lyric(id) { return api('/lyric?id=' + id); }
+async function detail(ids) { return api('/song/detail?ids=' + ids.join(',')); }
+
+// ---- 歌词 LRC 解析 ----
+function parseLrc(text) {
+  const out = [];
+  const re = /\[(\d{1,2}):(\d{1,2})(?:[.:](\d{1,3}))?\]/g;
+  for (const line of text.split('\n')) {
+    const tags = [];
+    let m;
+    re.lastIndex = 0;
+    while ((m = re.exec(line))) {
+      tags.push(+m[1] * 60 + +m[2] + (+(m[3] || 0)) / 1000);
+    }
+    const t = line.replace(re, '').trim();
+    if (!t) continue;
+    for (const tm of tags) out.push({ time: tm, text: t });
+  }
+  out.sort((a, b) => a.time - b.time);
+  return out;
+}
+
+function fmt(s) {
+  s = Math.floor(s || 0);
+  const m = Math.floor(s / 60), sec = s % 60;
+  return m + ':' + String(sec).padStart(2, '0');
+}
+
+function toast(msg) {
+  const t = $('#toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(t._h);
+  t._h = setTimeout(() => t.classList.remove('show'), 2600);
+}
+
+// ---- 渲染搜索结果 ----
+function renderTracks(list) {
+  const el = $('#tracklist');
+  if (!list.length) { el.innerHTML = '<div class="empty">没有结果</div>'; return; }
+  el.innerHTML = list.map((s, i) => `
+    <div class="track ${i === idx ? 'playing' : ''}" data-i="${i}">
+      <span class="idx">${i === idx ? '♪' : (i + 1)}</span>
+      <img class="cover" src="${s.cover || ''}" onerror="this.style.visibility='hidden'">
+      <div class="meta"><div class="name">${s.name}</div><div class="artist">${(s.artists || []).join(' / ')}</div></div>
+      <span class="play">▶</span>
+    </div>`).join('');
+  el.querySelectorAll('.track').forEach((n) => n.onclick = () => playAt(+n.dataset.i));
+}
+
+// ---- 播放 ----
+async function playAt(i) {
+  if (i < 0 || i >= queue.length) return;
+  idx = i;
+  const song = queue[i];
+  const id = song.id;
+  renderTracks(queue); // 高亮当前
+
+  $('#songName').textContent = song.name;
+  $('#songArtist').textContent = (song.artists || []).join(' / ') + ' · ' + (song.album || '');
+  $('#cover').src = (song.cover || '').replace('?param=300y300', '?param=300y300');
+  $('#songSrc').textContent = '音源：网易云…';
+
+  // 歌词
+  $('#lyrics').innerHTML = '<div class="empty">加载歌词中…</div>';
+  try { lrc = parseLrc((await lyric(id)).lrc || ''); renderLyrics(); } catch (e) { lrc = []; $('#lyrics').innerHTML = '<div class="empty">无歌词</div>'; }
+
+  // 播放地址
+  try {
+    const r = await songUrl(id);
+    if (!r.data || !r.data.url) {
+      toast('该歌曲暂不可播放（可能需登录或受版权限制）');
+      $('#btnPlay').textContent = '▶';
+      playing = false;
+      return;
+    }
+    const audio = $('#audio');
+    // 音频统一走服务端代理 /stream，解决解锁源防盗链导致浏览器无声的问题
+    audio.src = API + '/stream?url=' + encodeURIComponent(r.data.url);
+    $('#songSrc').textContent = r.data.unblocked
+      ? '音源：网易云 → 解锁(' + (r.data.source || '其他平台') + ')'
+      : '音源：网易云';
+    audio.play();
+    playing = true;
+    $('#btnPlay').textContent = '⏸';
+  } catch (e) {
+    toast('获取播放地址失败，请确认音源服务已启动');
+  }
+}
+
+function renderLyrics() {
+  const el = $('#lyrics');
+  if (!lrc.length) { el.innerHTML = '<div class="empty">无歌词</div>'; return; }
+  el.innerHTML = lrc.map((L, i) => `<div class="lyric-line" data-i="${i}">${L.text || ' '}</div>`).join('');
+}
+
+function nextTrack() { if (queue.length) playAt((idx + 1) % queue.length); }
+function prevTrack() { if (queue.length) playAt((idx - 1 + queue.length) % queue.length); }
+
+// ---- 事件 ----
+$('#btnSearch').onclick = doSearch;
+$('#kw').addEventListener('keydown', (e) => { if (e.key === 'Enter') doSearch(); });
+
+async function doSearch() {
+  const kw = $('#kw').value.trim();
+  if (!kw) return;
+  try {
+    const r = await search(kw);
+    if (!r.songs || !r.songs.length) { renderTracks([]); return; }
+    queue = r.songs;
+    idx = -1;
+    renderTracks(queue);
+    toast('找到 ' + queue.length + ' 首');
+  } catch (e) {
+    toast('搜索失败：请确认音源服务已启动 (http://localhost:41831)');
+  }
+}
+
+$('#btnPlay').onclick = () => {
+  const audio = $('#audio');
+  if (idx < 0 && queue.length) { playAt(0); return; }
+  if (!audio.src) { if (queue.length) playAt(0); return; }
+  if (audio.paused) { audio.play(); $('#btnPlay').textContent = '⏸'; }
+  else { audio.pause(); $('#btnPlay').textContent = '▶'; }
+};
+$('#btnNext').onclick = nextTrack;
+$('#btnPrev').onclick = prevTrack;
+
+$('#audio').addEventListener('timeupdate', () => {
+  const a = $('#audio');
+  $('#cur').textContent = fmt(a.currentTime);
+  $('#dur').textContent = fmt(a.duration || 0);
+  $('#fill').style.width = (a.duration ? (a.currentTime / a.duration) * 100 : 0) + '%';
+  // 歌词高亮
+  const t = a.currentTime;
+  let active = -1;
+  for (let i = 0; i < lrc.length; i++) { if (lrc[i].time <= t) active = i; else break; }
+  const el = $('#lyrics');
+  el.querySelectorAll('.lyric-line').forEach((n, i) => n.classList.toggle('active', i === active));
+  if (active >= 0) {
+    const node = el.children[active];
+    if (node) {
+      // 只滚动歌词容器本身（scrollTop），不要把整个页面往下拉
+      el.scrollTop = node.offsetTop - el.clientHeight / 2 + node.clientHeight / 2;
+    }
+  }
+});
+$('#audio').addEventListener('ended', nextTrack);
+$('#bar').addEventListener('click', (e) => {
+  const a = $('#audio'); if (!a.duration) return;
+  const r = e.target.getBoundingClientRect();
+  a.currentTime = ((e.clientX - r.left) / r.width) * a.duration;
+});
+
+// 默认加载一次搜索
+doSearch();
+</script>
+</body>
+</html>

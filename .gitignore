@@ -1,0 +1,24 @@
+# 依赖 / 构建产物
+node_modules/
+build/
+.dart_tool/
+.flutter-plugins-dependencies
+*.apk
+
+# 登录态与敏感数据（严禁上传）
+cookie.txt
+.bili_cookies.txt
+.npmrc
+
+# 日志
+*.log
+stdout.txt
+stderr.txt
+
+# 系统/编辑器
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.iml
+*.tmp
