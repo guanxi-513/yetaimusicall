@@ -344,6 +344,22 @@ async function biliAudioUrl(bvid) {
   return result
 }
 
+/** 读取 .bili_cookies.txt（Netscape cookie jar）→ "k=v; k2=v2" 的 Cookie 请求头字符串 */
+function readBiliCookieHeader() {
+  try {
+    const raw = fs.readFileSync(BILI_COOKIE, 'utf8')
+    const parts = []
+    for (const line of raw.split(/\r?\n/)) {
+      if (!line || line.startsWith('#')) continue
+      const f = line.split('\t')
+      if (f.length >= 7 && f[5]) parts.push(f[5] + '=' + (f[6] || ''))
+    }
+    return parts.join('; ')
+  } catch (e) {
+    return ''
+  }
+}
+
 /** B站音频流代理（curl.exe 抓取带防盗链的音频，支持 Range，转发给播放器） */
 async function proxyBiliStream(bvid, req, res) {
   let audio
@@ -669,11 +685,19 @@ const routes = {
     const bvid = q.get('bvid') || ''
     if (!bvid) throw Object.assign(new Error('缺少参数 bvid'), { status: 400 })
     const audio = await biliAudioUrl(bvid)
+    // directUrl + headers：App 端可带 Referer/UA/游客cookie 直连 B站 CDN（不占服务器带宽）；
+    // url 仍是 /stream/bili 转发路径，直连失败时前端回退用
     return {
       code: 200,
       data: {
         id: bvid,
         url: '/stream/bili?bvid=' + encodeURIComponent(bvid),
+        directUrl: audio.url,
+        headers: {
+          'Referer': 'https://www.bilibili.com/',
+          'User-Agent': BILI_UA,
+          'Cookie': readBiliCookieHeader(),
+        },
         duration: audio.duration,
         size: audio.size,
         source: 'bilibili',
@@ -886,6 +910,13 @@ const routes = {
     const key = q.get('key')
     if (!key) throw Object.assign(new Error('缺少参数 key'), { status: 400 })
     const body = await call('login_qr_check', { key })
+    // 登录成功（code=803）：把登录态 cookie 回传给客户端自行保存。
+    // 客户端后续请求自带 cookie → 走"请求 cookie 优先"，多用户隔离才真正闭环；
+    // 不返回 cookie 时客户端无法保存，会全部回退全局 cookie.txt（谁最后登录显示谁）。
+    let cookie = ''
+    if (body.code === 803) {
+      cookie = (body && body.cookie) || savedCookie || ''
+    }
     // 登录成功（code=803）时记录日志（本地专用模块，开源版本无此功能）
     if (body.code === 803 && adminLogger) {
       try {
@@ -900,7 +931,7 @@ const routes = {
         })
       } catch (e) { /* 记录日志失败不影响登录响应 */ }
     }
-    return { code: body.code, message: body.message }
+    return { code: body.code, message: body.message, cookie }
   },
 
   // 当前登录状态
