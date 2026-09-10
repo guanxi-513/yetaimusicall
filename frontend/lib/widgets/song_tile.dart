@@ -8,6 +8,7 @@ import 'package:provider/provider.dart';
 import '../models/song.dart';
 import '../state/auth_state.dart';
 import '../state/player_state.dart';
+import '../state/ui_settings.dart';
 import 'glass_card.dart';
 import 'tap_scale.dart';
 
@@ -59,14 +60,17 @@ class SongTile extends StatelessWidget {
     };
 
     // 列表项 stagger 淡入：按 index 递延 40ms，只在首次构建时播一次
-    final card = GlassCard(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      borderRadius: 18,
-      blurSigma: 14,
-      color: isCurrent ? Colors.white.withOpacity(0.20) : null,
-      onTap: () => player.play(song, queue: queue),
-      child: Row(
+    // 卡片毛玻璃开关在设置页「自定义界面」可调，默认关闭（省性能）
+    final card = ValueListenableBuilder<bool>(
+      valueListenable: songCardBlur,
+      builder: (_, blur, __) => GlassCard(
+        margin: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        borderRadius: 18,
+        blur: blur,
+        color: isCurrent ? Colors.white.withOpacity(0.20) : null,
+        onTap: () => player.play(song, queue: queue),
+        child: Row(
         children: [
           // 序号（可选）
           if (index != null) ...[
@@ -173,6 +177,7 @@ class SongTile extends StatelessWidget {
           ],
         ],
       ),
+    ),
     );
 
     // 按压缩放反馈（不接管点击，点击仍由 GlassCard 内部处理）

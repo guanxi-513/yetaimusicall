@@ -10,7 +10,6 @@ import 'package:provider/provider.dart';
 
 import '../config.dart';
 import '../models/song.dart';
-import '../services/page_snapshot.dart';
 import '../state/auth_state.dart';
 import '../state/player_state.dart';
 import '../widgets/glass_background.dart';
@@ -75,7 +74,6 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
     _lyricController.dispose();
     _closeCtrl.dispose();
     _returnCtrl.dispose();
-    updatePageSnapshot(null); // 释放背景截图，防止退出后占内存
     super.dispose();
   }
 
@@ -108,26 +106,7 @@ class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
         child: Stack(
           fit: StackFit.expand,
           children: [
-            // 背景：上一页截图模糊（无截图时用 GlassBackground 渐变兜底）
-            cachedPageSnapshot != null
-                ? Positioned.fill(
-                    child: ImageFiltered(
-                      imageFilter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
-                      child: RawImage(
-                        image: cachedPageSnapshot,
-                        fit: BoxFit.cover,
-                      ),
-                    ),
-                  )
-                : Positioned.fill(
-                    child: GlassBackground(child: const SizedBox.shrink()),
-                  ),
-            // 深色遮罩：保证前景文字可读
-            const ColoredBox(
-              color: Color(0x40000000),
-              child: SizedBox.expand(),
-            ),
-            // 前景内容（原 Scaffold，backgroundColor 保持 transparent）
+            // 全透明背景：透出下层页面（路由 opaque:false）
             Scaffold(
               backgroundColor: Colors.transparent,
               appBar: AppBar(

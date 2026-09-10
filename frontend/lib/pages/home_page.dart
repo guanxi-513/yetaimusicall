@@ -6,9 +6,9 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../config.dart';
-import '../services/page_snapshot.dart';
 import '../state/auth_state.dart';
 import '../state/player_state.dart';
+import '../state/ui_settings.dart';
 import 'charts_page.dart';
 import 'login_dialog.dart';
 import 'playlists_page.dart';
@@ -59,41 +59,36 @@ class _HomePageState extends State<HomePage> {
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthState>();
-    return RepaintBoundary(
-      key: pageSnapshotKey,
-      child: SafeArea(
-        bottom: false,
-        child: Column(
-          children: [
-            // 顶部毛玻璃导航栏
-            _GlassNavBar(
-              labels: _titles,
-              tabIndex: _tab,
-              onTabChanged: (i) => setState(() => _tab = i),
-              avatarUrl: auth.user?.avatar,
-              // 任一音源（网易云/酷狗/QQ/汽水）已登录：显示用户图标（区别于设置图标）
-              anyLoggedIn:
-                  auth.loggedIn ||
-                  auth.kugouLoggedIn ||
-                  auth.qqLoggedIn ||
-                  auth.sodaLoggedIn,
-              onAvatarTap: () => _showSettings(context),
+    return SafeArea(
+      bottom: false,
+      child: Column(
+        children: [
+          // 顶部毛玻璃导航栏
+          _GlassNavBar(
+            labels: _titles,
+            tabIndex: _tab,
+            onTabChanged: (i) => setState(() => _tab = i),
+            avatarUrl: auth.user?.avatar,
+            anyLoggedIn: auth.loggedIn ||
+                auth.kugouLoggedIn ||
+                auth.qqLoggedIn ||
+                auth.sodaLoggedIn,
+            onAvatarTap: () => _showSettings(context),
+          ),
+          // 内容区
+          Expanded(
+            child: IndexedStack(
+              index: _tab,
+              children: [
+                const RecommendView(),
+                const SearchPage(),
+                const ChartsPage(),
+                // 传入可见状态：切回「我的」时强制刷新收藏/历史
+                PlaylistsPage(isActive: _tab == 3),
+              ],
             ),
-            // 内容区
-            Expanded(
-              child: IndexedStack(
-                index: _tab,
-                children: [
-                  const RecommendView(),
-                  const SearchPage(),
-                  const ChartsPage(),
-                  // 传入可见状态：切回「我的」时强制刷新收藏/历史
-                  PlaylistsPage(isActive: _tab == 3),
-                ],
-              ),
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -276,10 +271,10 @@ class _SettingsDialogState extends State<_SettingsDialog> {
   Widget build(BuildContext context) {
     final auth = context.watch<AuthState>();
     return AlertDialog(
-      backgroundColor: const Color(0xFF251B3D),
+      backgroundColor: const Color(0xFF121216),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(20),
-        side: BorderSide(color: Colors.white.withOpacity(0.2)),
+        side: BorderSide(color: Colors.white.withOpacity(0.15)),
       ),
       title: const Text('设置', style: TextStyle(color: Colors.white)),
       content: SingleChildScrollView(
@@ -320,6 +315,32 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                 color: Colors.white38,
                 fontSize: 11,
                 height: 1.6,
+              ),
+            ),
+            const SizedBox(height: 20),
+            // ---- 自定义界面 ----
+            const Text(
+              '自定义界面',
+              style: TextStyle(color: Colors.white70, fontSize: 13),
+            ),
+            const SizedBox(height: 8),
+            ValueListenableBuilder<bool>(
+              valueListenable: songCardBlur,
+              builder: (_, blur, __) => SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text(
+                  '歌曲卡片毛玻璃',
+                  style: TextStyle(color: Colors.white, fontSize: 14),
+                ),
+                subtitle: const Text(
+                  '开启后歌曲卡片带背景模糊；关闭可提升列表滚动性能',
+                  style: TextStyle(color: Colors.white38, fontSize: 11),
+                ),
+                value: blur,
+                activeTrackColor: const Color(0xFF1DB954),
+                activeThumbColor: Colors.white,
+                inactiveTrackColor: Colors.white.withOpacity(0.15),
+                onChanged: setSongCardBlur,
               ),
             ),
           ],

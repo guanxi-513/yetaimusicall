@@ -1,4 +1,5 @@
 /// 深色弥散渐变背景（深空蓝紫 → 暗粉柔光光斑）
+/// 用于播放页 / 歌单详情页的"无截图"兜底背景
 library;
 
 import 'package:flutter/material.dart';

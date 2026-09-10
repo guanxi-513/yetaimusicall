@@ -16,7 +16,6 @@ import 'package:provider/provider.dart';
 import '../config.dart';
 import '../models/song.dart';
 import '../services/api_service.dart';
-import '../services/page_snapshot.dart';
 import '../state/auth_state.dart';
 import '../state/player_state.dart';
 import '../widgets/glass_card.dart';
@@ -212,10 +211,6 @@ class _RecommendViewState extends State<RecommendView>
     try {
       // 清空队列 → 全部按顺序加入 → 从第一首播放
       await context.read<PlayerState>().playAll(songs);
-      if (!mounted) return;
-      // 进入播放页前：截当前页面 → 存全局（内部自动释放旧图）
-      final shot = await capturePageSnapshot();
-      updatePageSnapshot(shot);
       if (!mounted) return;
       // 播放页从底部向上滑入（与迷你播放条一致）
       Navigator.of(context).push(playerRoute());

@@ -13,8 +13,10 @@ import 'services/audio_handler.dart';
 import 'services/media_notification_bridge.dart';
 import 'state/auth_state.dart';
 import 'state/player_state.dart';
+import 'state/ui_settings.dart';
 import 'widgets/glass_background.dart';
 import 'widgets/mini_player_bar.dart';
+import 'widgets/spotify_background.dart';
 
 /// 全局状态（main 中创建，Provider.value 注入）
 late final PlayerState playerState;
@@ -27,6 +29,8 @@ Future<void> main() async {
   await AppConfig.load();
   // 加载本地持久化的登录 cookie（登录态跟随本设备，重启不丢失）
   await ApiService.loadCookies();
+  // 加载 UI 设置（歌曲卡片毛玻璃开关等）
+  await loadUiSettings();
 
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(
@@ -118,7 +122,7 @@ class _HomeShell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GlassBackground(
+    return SpotifyBackground(
       child: Scaffold(
         backgroundColor: Colors.transparent,
         body: const HomePage(),

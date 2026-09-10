@@ -9,7 +9,6 @@ import 'package:provider/provider.dart';
 
 import '../models/song.dart';
 import '../pages/player_page.dart';
-import '../services/page_snapshot.dart';
 import '../state/player_state.dart';
 import 'tap_scale.dart';
 
@@ -46,9 +45,6 @@ class _Bar extends StatelessWidget {
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: () async {
-        // 进入播放页前：截当前页面 → 存全局（内部自动释放旧图）
-        final shot = await capturePageSnapshot();
-        updatePageSnapshot(shot);
         if (!context.mounted) return;
         Navigator.of(context).push(playerRoute());
       },
