@@ -9,6 +9,7 @@ import 'package:provider/provider.dart';
 
 import '../models/song.dart';
 import '../pages/player_page.dart';
+import '../services/page_snapshot.dart';
 import '../state/player_state.dart';
 import 'tap_scale.dart';
 
@@ -44,7 +45,13 @@ class _Bar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: () => Navigator.of(context).push(playerRoute()),
+      onTap: () async {
+        // 进入播放页前：截当前页面 → 存全局（内部自动释放旧图）
+        final shot = await capturePageSnapshot();
+        updatePageSnapshot(shot);
+        if (!context.mounted) return;
+        Navigator.of(context).push(playerRoute());
+      },
       child: Container(
         margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
         decoration: BoxDecoration(
@@ -62,8 +69,7 @@ class _Bar extends StatelessWidget {
           child: BackdropFilter(
             filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
             child: Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               decoration: BoxDecoration(
                 gradient: LinearGradient(
                   begin: Alignment.topLeft,
@@ -73,8 +79,10 @@ class _Bar extends StatelessWidget {
                     Colors.white.withOpacity(0.08),
                   ],
                 ),
-                border:
-                    Border.all(color: Colors.white.withOpacity(0.28), width: 1),
+                border: Border.all(
+                  color: Colors.white.withOpacity(0.28),
+                  width: 1,
+                ),
                 borderRadius: BorderRadius.circular(20),
               ),
               child: Row(
@@ -86,19 +94,22 @@ class _Bar extends StatelessWidget {
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
                       border: Border.all(
-                          color: Colors.white.withOpacity(0.35), width: 1),
+                        color: Colors.white.withOpacity(0.35),
+                        width: 1,
+                      ),
                     ),
                     child: ClipOval(
                       child: (player.currentDetail ?? song).cover.isEmpty
                           ? Container(
                               color: Colors.white.withOpacity(0.12),
-                              child: Icon(Icons.music_note,
-                                  color: Colors.white.withOpacity(0.7),
-                                  size: 20),
+                              child: Icon(
+                                Icons.music_note,
+                                color: Colors.white.withOpacity(0.7),
+                                size: 20,
+                              ),
                             )
                           : CachedNetworkImage(
-                              imageUrl:
-                                  (player.currentDetail ?? song).cover,
+                              imageUrl: (player.currentDetail ?? song).cover,
                               fit: BoxFit.cover,
                             ),
                     ),
@@ -193,8 +204,9 @@ class _PlayPauseIcon extends StatelessWidget {
                 padding: const EdgeInsets.all(10),
                 child: CircularProgressIndicator(
                   strokeWidth: 2,
-                  valueColor:
-                      AlwaysStoppedAnimation(Colors.white.withOpacity(0.9)),
+                  valueColor: AlwaysStoppedAnimation(
+                    Colors.white.withOpacity(0.9),
+                  ),
                 ),
               )
             // 播放/暂停图标切换：缩放过渡

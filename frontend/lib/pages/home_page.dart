@@ -1,13 +1,12 @@
 /// 首页：毛玻璃导航栏 + 四个子页（每日推荐 / 搜索 / 榜单 / 我的歌单）
 library;
 
-import 'dart:ui';
-
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../config.dart';
+import '../services/page_snapshot.dart';
 import '../state/auth_state.dart';
 import '../state/player_state.dart';
 import 'charts_page.dart';
@@ -25,6 +24,7 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   int _tab = 0;
+
   /// 记录上次登录态，检测到变化时同步云收藏集合：
   /// - 登录（含 App 启动时 cookie 恢复登录）→ 拉取网易云喜欢列表，
   ///   使"我喜欢的音乐"歌单内歌曲默认点亮爱心、点一下直接取消云端喜欢
@@ -59,37 +59,41 @@ class _HomePageState extends State<HomePage> {
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthState>();
-    return SafeArea(
-      bottom: false,
-      child: Column(
-        children: [
-          // 顶部毛玻璃导航栏
-          _GlassNavBar(
-            labels: _titles,
-            tabIndex: _tab,
-            onTabChanged: (i) => setState(() => _tab = i),
-            avatarUrl: auth.user?.avatar,
-            // 任一音源（网易云/酷狗/QQ/汽水）已登录：显示用户图标（区别于设置图标）
-            anyLoggedIn: auth.loggedIn ||
-                auth.kugouLoggedIn ||
-                auth.qqLoggedIn ||
-                auth.sodaLoggedIn,
-            onAvatarTap: () => _showSettings(context),
-          ),
-          // 内容区
-          Expanded(
-            child: IndexedStack(
-              index: _tab,
-              children: [
-                const RecommendView(),
-                const SearchPage(),
-                const ChartsPage(),
-                // 传入可见状态：切回「我的」时强制刷新收藏/历史
-                PlaylistsPage(isActive: _tab == 3),
-              ],
+    return RepaintBoundary(
+      key: pageSnapshotKey,
+      child: SafeArea(
+        bottom: false,
+        child: Column(
+          children: [
+            // 顶部毛玻璃导航栏
+            _GlassNavBar(
+              labels: _titles,
+              tabIndex: _tab,
+              onTabChanged: (i) => setState(() => _tab = i),
+              avatarUrl: auth.user?.avatar,
+              // 任一音源（网易云/酷狗/QQ/汽水）已登录：显示用户图标（区别于设置图标）
+              anyLoggedIn:
+                  auth.loggedIn ||
+                  auth.kugouLoggedIn ||
+                  auth.qqLoggedIn ||
+                  auth.sodaLoggedIn,
+              onAvatarTap: () => _showSettings(context),
             ),
-          ),
-        ],
+            // 内容区
+            Expanded(
+              child: IndexedStack(
+                index: _tab,
+                children: [
+                  const RecommendView(),
+                  const SearchPage(),
+                  const ChartsPage(),
+                  // 传入可见状态：切回「我的」时强制刷新收藏/历史
+                  PlaylistsPage(isActive: _tab == 3),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -133,105 +137,111 @@ class _GlassNavBar extends StatelessWidget {
       ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(22),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  Colors.white.withOpacity(0.16),
-                  Colors.white.withOpacity(0.06),
-                ],
-              ),
-              border: Border.all(color: Colors.white.withOpacity(0.25), width: 1),
-              borderRadius: BorderRadius.circular(22),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                Colors.white.withOpacity(0.16),
+                Colors.white.withOpacity(0.06),
+              ],
             ),
-            child: Row(
-              children: [
-                // App 标题
-                const Text(
-                  '液态音乐',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 18,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 1.0,
-                  ),
+            border: Border.all(color: Colors.white.withOpacity(0.25), width: 1),
+            borderRadius: BorderRadius.circular(22),
+          ),
+          child: Row(
+            children: [
+              // App 标题
+              const Text(
+                '液态音乐',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 1.0,
                 ),
-                const SizedBox(width: 8),
-                // 分段切换
-                ...List.generate(labels.length, (i) {
-                  final selected = tabIndex == i;
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 2),
-                    child: GestureDetector(
-                      onTap: () => onTabChanged(i),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 9, vertical: 6),
-                        decoration: BoxDecoration(
+              ),
+              const SizedBox(width: 8),
+              // 分段切换
+              ...List.generate(labels.length, (i) {
+                final selected = tabIndex == i;
+                return Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 2),
+                  child: GestureDetector(
+                    onTap: () => onTabChanged(i),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 9,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: selected
+                            ? Colors.white.withOpacity(0.28)
+                            : Colors.transparent,
+                        borderRadius: BorderRadius.circular(13),
+                        border: Border.all(
                           color: selected
-                              ? Colors.white.withOpacity(0.28)
-                              : Colors.transparent,
-                          borderRadius: BorderRadius.circular(13),
-                          border: Border.all(
-                            color: selected
-                                ? Colors.white.withOpacity(0.4)
-                                : Colors.white.withOpacity(0.12),
-                          ),
+                              ? Colors.white.withOpacity(0.4)
+                              : Colors.white.withOpacity(0.12),
                         ),
-                        child: Text(
-                          labels[i],
-                          style: TextStyle(
-                            color: selected
-                                ? Colors.white
-                                : Colors.white.withOpacity(0.55),
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                          ),
+                      ),
+                      child: Text(
+                        labels[i],
+                        style: TextStyle(
+                          color: selected
+                              ? Colors.white
+                              : Colors.white.withOpacity(0.55),
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
                     ),
-                  );
-                }),
-                const Spacer(),
-                // 头像 / 设置入口
-                GestureDetector(
-                  onTap: onAvatarTap,
-                  child: Container(
-                    width: 34,
-                    height: 34,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: Colors.white.withOpacity(0.14),
-                      border: Border.all(
-                          color: Colors.white.withOpacity(0.3), width: 1),
-                    ),
-                    child: (avatarUrl != null && avatarUrl!.isNotEmpty)
-                        ? ClipOval(
-                            child: CachedNetworkImage(
-                              imageUrl: avatarUrl!,
-                              fit: BoxFit.cover,
-                              placeholder: (_, __) => Icon(Icons.person,
-                                  color: Colors.white.withOpacity(0.85),
-                                  size: 18),
-                              errorWidget: (_, __, ___) => Icon(Icons.person,
-                                  color: Colors.white.withOpacity(0.85),
-                                  size: 18),
-                            ),
-                          )
-                        : Icon(
-                            // 已有任一音源登录 → 用户图标；否则设置图标
-                            anyLoggedIn ? Icons.person : Icons.settings,
-                            color: Colors.white.withOpacity(0.85),
-                            size: 18),
                   ),
+                );
+              }),
+              const Spacer(),
+              // 头像 / 设置入口
+              GestureDetector(
+                onTap: onAvatarTap,
+                child: Container(
+                  width: 34,
+                  height: 34,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: Colors.white.withOpacity(0.14),
+                    border: Border.all(
+                      color: Colors.white.withOpacity(0.3),
+                      width: 1,
+                    ),
+                  ),
+                  child: (avatarUrl != null && avatarUrl!.isNotEmpty)
+                      ? ClipOval(
+                          child: CachedNetworkImage(
+                            imageUrl: avatarUrl!,
+                            fit: BoxFit.cover,
+                            placeholder: (_, __) => Icon(
+                              Icons.person,
+                              color: Colors.white.withOpacity(0.85),
+                              size: 18,
+                            ),
+                            errorWidget: (_, __, ___) => Icon(
+                              Icons.person,
+                              color: Colors.white.withOpacity(0.85),
+                              size: 18,
+                            ),
+                          ),
+                        )
+                      : Icon(
+                          // 已有任一音源登录 → 用户图标；否则设置图标
+                          anyLoggedIn ? Icons.person : Icons.settings,
+                          color: Colors.white.withOpacity(0.85),
+                          size: 18,
+                        ),
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       ),
@@ -306,7 +316,11 @@ class _SettingsDialogState extends State<_SettingsDialog> {
               '· 模拟器访问电脑：http://10.0.2.2:41831\n'
               '· 真机访问电脑：http://<电脑局域网IP>:41831\n'
               '· 服务器部署：http://<服务器公网IP>:41831',
-              style: TextStyle(color: Colors.white38, fontSize: 11, height: 1.6),
+              style: TextStyle(
+                color: Colors.white38,
+                fontSize: 11,
+                height: 1.6,
+              ),
             ),
           ],
         ),
@@ -330,20 +344,24 @@ class _SettingsDialogState extends State<_SettingsDialog> {
 
   Widget _buildUserSection(AuthState auth) {
     if (auth.checking ||
-      auth.kugouChecking ||
-      auth.qqChecking ||
-      auth.sodaChecking) {
+        auth.kugouChecking ||
+        auth.qqChecking ||
+        auth.sodaChecking) {
       return const Row(
         children: [
           SizedBox(
             width: 18,
             height: 18,
             child: CircularProgressIndicator(
-                color: Colors.white70, strokeWidth: 2),
+              color: Colors.white70,
+              strokeWidth: 2,
+            ),
           ),
           SizedBox(width: 10),
-          Text('检查登录状态…',
-              style: TextStyle(color: Colors.white54, fontSize: 13)),
+          Text(
+            '检查登录状态…',
+            style: TextStyle(color: Colors.white54, fontSize: 13),
+          ),
         ],
       );
     }
@@ -351,20 +369,22 @@ class _SettingsDialogState extends State<_SettingsDialog> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         // ---- 网易云账号 ----
-        if (auth.loggedIn && auth.user != null) _buildNeteaseRow(auth)
-        else _buildNeteaseLoginEntry(),
+        if (auth.loggedIn && auth.user != null)
+          _buildNeteaseRow(auth)
+        else
+          _buildNeteaseLoginEntry(),
         // ---- 酷狗账号 ----
         const SizedBox(height: 12),
-        if (auth.kugouLoggedIn) _buildKugouRow(auth)
-        else _buildKugouLoginEntry(),
+        if (auth.kugouLoggedIn)
+          _buildKugouRow(auth)
+        else
+          _buildKugouLoginEntry(),
         // ---- QQ 账号 ----
         const SizedBox(height: 12),
-        if (auth.qqLoggedIn) _buildQQRow(auth)
-        else _buildQQLoginEntry(),
+        if (auth.qqLoggedIn) _buildQQRow(auth) else _buildQQLoginEntry(),
         // ---- 汽水账号 ----
         const SizedBox(height: 12),
-        if (auth.sodaLoggedIn) _buildSodaRow(auth)
-        else _buildSodaLoginEntry(),
+        if (auth.sodaLoggedIn) _buildSodaRow(auth) else _buildSodaLoginEntry(),
       ],
     );
   }
@@ -387,10 +407,14 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                 : CachedNetworkImage(
                     imageUrl: u.avatar,
                     fit: BoxFit.cover,
-                    placeholder: (_, __) =>
-                        Icon(Icons.person, color: Colors.white.withOpacity(0.7)),
-                    errorWidget: (_, __, ___) => Icon(Icons.person,
-                        color: Colors.white.withOpacity(0.7)),
+                    placeholder: (_, __) => Icon(
+                      Icons.person,
+                      color: Colors.white.withOpacity(0.7),
+                    ),
+                    errorWidget: (_, __, ___) => Icon(
+                      Icons.person,
+                      color: Colors.white.withOpacity(0.7),
+                    ),
                   ),
           ),
         ),
@@ -412,8 +436,10 @@ class _SettingsDialogState extends State<_SettingsDialog> {
               const SizedBox(height: 2),
               Text(
                 '已登录网易云音乐',
-                style:
-                    TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 11),
+                style: TextStyle(
+                  color: Colors.white.withOpacity(0.5),
+                  fontSize: 11,
+                ),
               ),
             ],
           ),
@@ -429,8 +455,9 @@ class _SettingsDialogState extends State<_SettingsDialog> {
             decoration: BoxDecoration(
               color: const Color(0xFFE05A8A).withOpacity(0.18),
               borderRadius: BorderRadius.circular(12),
-              border:
-                  Border.all(color: const Color(0xFFE05A8A).withOpacity(0.4)),
+              border: Border.all(
+                color: const Color(0xFFE05A8A).withOpacity(0.4),
+              ),
             ),
             child: const Text(
               '退出登录',
@@ -470,7 +497,11 @@ class _SettingsDialogState extends State<_SettingsDialog> {
         ),
         child: Row(
           children: [
-            Icon(Icons.qr_code_2, color: Colors.white.withOpacity(0.9), size: 22),
+            Icon(
+              Icons.qr_code_2,
+              color: Colors.white.withOpacity(0.9),
+              size: 22,
+            ),
             const SizedBox(width: 10),
             const Expanded(
               child: Text(
@@ -482,8 +513,11 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                 ),
               ),
             ),
-            Icon(Icons.arrow_forward_ios,
-                color: Colors.white.withOpacity(0.5), size: 14),
+            Icon(
+              Icons.arrow_forward_ios,
+              color: Colors.white.withOpacity(0.5),
+              size: 14,
+            ),
           ],
         ),
       ),
@@ -504,8 +538,11 @@ class _SettingsDialogState extends State<_SettingsDialog> {
             border: Border.all(color: Colors.white.withOpacity(0.4), width: 1),
           ),
           child: ClipOval(
-            child: Icon(Icons.graphic_eq,
-                color: Colors.white.withOpacity(0.85), size: 22),
+            child: Icon(
+              Icons.graphic_eq,
+              color: Colors.white.withOpacity(0.85),
+              size: 22,
+            ),
           ),
         ),
         const SizedBox(width: 12),
@@ -538,8 +575,9 @@ class _SettingsDialogState extends State<_SettingsDialog> {
             decoration: BoxDecoration(
               color: const Color(0xFFE05A8A).withOpacity(0.18),
               borderRadius: BorderRadius.circular(12),
-              border:
-                  Border.all(color: const Color(0xFFE05A8A).withOpacity(0.4)),
+              border: Border.all(
+                color: const Color(0xFFE05A8A).withOpacity(0.4),
+              ),
             ),
             child: const Text(
               '退出登录',
@@ -576,7 +614,11 @@ class _SettingsDialogState extends State<_SettingsDialog> {
         ),
         child: Row(
           children: [
-            Icon(Icons.qr_code_2, color: Colors.white.withOpacity(0.9), size: 22),
+            Icon(
+              Icons.qr_code_2,
+              color: Colors.white.withOpacity(0.9),
+              size: 22,
+            ),
             const SizedBox(width: 10),
             const Expanded(
               child: Text(
@@ -588,8 +630,11 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                 ),
               ),
             ),
-            Icon(Icons.arrow_forward_ios,
-                color: Colors.white.withOpacity(0.5), size: 14),
+            Icon(
+              Icons.arrow_forward_ios,
+              color: Colors.white.withOpacity(0.5),
+              size: 14,
+            ),
           ],
         ),
       ),
@@ -610,8 +655,11 @@ class _SettingsDialogState extends State<_SettingsDialog> {
             border: Border.all(color: Colors.white.withOpacity(0.4), width: 1),
           ),
           child: ClipOval(
-            child: Icon(Icons.music_note,
-                color: Colors.white.withOpacity(0.85), size: 22),
+            child: Icon(
+              Icons.music_note,
+              color: Colors.white.withOpacity(0.85),
+              size: 22,
+            ),
           ),
         ),
         const SizedBox(width: 12),
@@ -644,8 +692,9 @@ class _SettingsDialogState extends State<_SettingsDialog> {
             decoration: BoxDecoration(
               color: const Color(0xFFE05A8A).withOpacity(0.18),
               borderRadius: BorderRadius.circular(12),
-              border:
-                  Border.all(color: const Color(0xFFE05A8A).withOpacity(0.4)),
+              border: Border.all(
+                color: const Color(0xFFE05A8A).withOpacity(0.4),
+              ),
             ),
             child: const Text(
               '退出登录',
@@ -682,7 +731,11 @@ class _SettingsDialogState extends State<_SettingsDialog> {
         ),
         child: Row(
           children: [
-            Icon(Icons.qr_code_2, color: Colors.white.withOpacity(0.9), size: 22),
+            Icon(
+              Icons.qr_code_2,
+              color: Colors.white.withOpacity(0.9),
+              size: 22,
+            ),
             const SizedBox(width: 10),
             const Expanded(
               child: Text(
@@ -694,8 +747,11 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                 ),
               ),
             ),
-            Icon(Icons.arrow_forward_ios,
-                color: Colors.white.withOpacity(0.5), size: 14),
+            Icon(
+              Icons.arrow_forward_ios,
+              color: Colors.white.withOpacity(0.5),
+              size: 14,
+            ),
           ],
         ),
       ),
@@ -720,13 +776,20 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                 ? CachedNetworkImage(
                     imageUrl: u.avatar,
                     fit: BoxFit.cover,
-                    placeholder: (_, __) => Icon(Icons.person,
-                        color: Colors.white.withOpacity(0.7)),
-                    errorWidget: (_, __, ___) => Icon(Icons.water_drop_outlined,
-                        color: Colors.white.withOpacity(0.7)),
+                    placeholder: (_, __) => Icon(
+                      Icons.person,
+                      color: Colors.white.withOpacity(0.7),
+                    ),
+                    errorWidget: (_, __, ___) => Icon(
+                      Icons.water_drop_outlined,
+                      color: Colors.white.withOpacity(0.7),
+                    ),
                   )
-                : Icon(Icons.water_drop,
-                    color: Colors.white.withOpacity(0.85), size: 22),
+                : Icon(
+                    Icons.water_drop,
+                    color: Colors.white.withOpacity(0.85),
+                    size: 22,
+                  ),
           ),
         ),
         const SizedBox(width: 12),
@@ -759,8 +822,9 @@ class _SettingsDialogState extends State<_SettingsDialog> {
             decoration: BoxDecoration(
               color: const Color(0xFFE05A8A).withOpacity(0.18),
               borderRadius: BorderRadius.circular(12),
-              border:
-                  Border.all(color: const Color(0xFFE05A8A).withOpacity(0.4)),
+              border: Border.all(
+                color: const Color(0xFFE05A8A).withOpacity(0.4),
+              ),
             ),
             child: const Text(
               '退出登录',
@@ -797,7 +861,11 @@ class _SettingsDialogState extends State<_SettingsDialog> {
         ),
         child: Row(
           children: [
-            Icon(Icons.qr_code_2, color: Colors.white.withOpacity(0.9), size: 22),
+            Icon(
+              Icons.qr_code_2,
+              color: Colors.white.withOpacity(0.9),
+              size: 22,
+            ),
             const SizedBox(width: 10),
             const Expanded(
               child: Text(
@@ -809,8 +877,11 @@ class _SettingsDialogState extends State<_SettingsDialog> {
                 ),
               ),
             ),
-            Icon(Icons.arrow_forward_ios,
-                color: Colors.white.withOpacity(0.5), size: 14),
+            Icon(
+              Icons.arrow_forward_ios,
+              color: Colors.white.withOpacity(0.5),
+              size: 14,
+            ),
           ],
         ),
       ),

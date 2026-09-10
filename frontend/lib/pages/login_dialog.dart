@@ -179,8 +179,8 @@ class _LoginDialogState extends State<LoginDialog> {
   // ---------- 网易云轮询（801/802/803/800） ----------
 
   Future<void> _pollNetease() async {
-    final code = await ApiService.loginQrCheck(_unikey);
-    switch (code) {
+    final result = await ApiService.loginQrCheck(_unikey);
+    switch (result.code) {
       case 800:
         if (mounted) {
           setState(() {
@@ -203,6 +203,10 @@ class _LoginDialogState extends State<LoginDialog> {
         break;
       case 803:
         _timer?.cancel();
+        // 保存登录态：先 clear 再写入，确保多设备各用各的账号，互不覆盖
+        if (result.cookie.isNotEmpty) {
+          await ApiService.setNeteaseCookie(result.cookie);
+        }
         if (mounted) {
           setState(() {
             _status = _QrStatus.success;

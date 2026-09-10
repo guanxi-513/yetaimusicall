@@ -59,6 +59,15 @@ class LikeResult {
   });
 }
 
+/// 网易云扫码登录结果
+/// code: 800=过期 801=等待 802=已扫 803=成功
+/// cookie: 登录成功后后端回传的登录态整串（可能为空）
+class NeteaseQrCheckResult {
+  final int code;
+  final String cookie;
+  const NeteaseQrCheckResult(this.code, this.cookie);
+}
+
 class ApiService {
   ApiService._();
 
@@ -199,6 +208,21 @@ class ApiService {
     // 收到新 cookie 后持久化到本地（登录态重启不丢失）
     // ignore: unawaited_futures
     _persistCookies();
+  }
+
+  /// 保存网易云登录态 cookie（扫码成功时调用，整串保存整串回传）
+  /// 覆盖式写入：先 clear 再写入，避免新旧账号 cookie 混合
+  static Future<void> setNeteaseCookie(String cookie) async {
+    _cookies.clear();
+    for (final seg in cookie.split(';')) {
+      final eq = seg.indexOf('=');
+      if (eq <= 0) continue;
+      final name = seg.substring(0, eq).trim();
+      final value = seg.substring(eq + 1).trim();
+      if (name.isNotEmpty && value.isNotEmpty) _cookies[name] = value;
+    }
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_cookiePrefsKey, _cookieHeader());
   }
 
   /// 清除所有存储的 cookie（退出登录时调用），并清除本地持久化
@@ -420,20 +444,36 @@ class ApiService {
     return songs!.map((e) => Song.fromJson(e as Map<String, dynamic>)).toList();
   }
 
-  /// B站取流地址：GET /song/url/bili?bvid=xxx
-  /// 返回 { data: { id: bvid, url: '/stream/bili?bvid=xxx', source:'bilibili' } }
-  /// data.url 是相对路径，需拼接 apiBaseUrl 前缀
-  static Future<String> biliStreamUrl(String bvid) async {
+  /// B站取流：GET /song/url/bili?bvid=xxx
+  /// 后端返回 { data: { id, url(转发回退), directUrl(B站CDN直链), headers(直连必需), source } }
+  /// directUrl 有时效（约10分钟），每次播放前实时请求；headers 含 Referer/UA/游客Cookie
+  static Future<({String url, String directUrl, Map<String, String> headers})>
+  biliStreamUrl(String bvid) async {
     final data = await _getJson('/song/url/bili', {'bvid': bvid});
     final inner = data['data'];
-    final url = inner is Map ? inner['url']?.toString() : null;
-    if (url == null || url.isEmpty) {
+    if (inner is! Map) {
       throw ApiException('未获取到B站播放地址（bvid=$bvid）');
     }
     final base = AppConfig.apiBaseUrl.replaceAll(RegExp(r'/+$'), '');
-    // url 可能是相对路径 (/stream/bili?bvid=xxx) 或绝对路径
-    if (url.startsWith('http')) return url;
-    return '$base$url';
+    String abs(String? u) {
+      if (u == null || u.isEmpty) return '';
+      if (u.startsWith('http')) return u;
+      return '$base$u';
+    }
+
+    final headers = <String, String>{};
+    final h = inner['headers'];
+    if (h is Map) {
+      h.forEach((k, v) {
+        final vs = v?.toString() ?? '';
+        if (vs.isNotEmpty) headers[k.toString()] = vs;
+      });
+    }
+    return (
+      url: abs(inner['url']?.toString()),
+      directUrl: abs(inner['directUrl']?.toString()),
+      headers: headers,
+    );
   }
 
   // ---------------- 酷狗音源 ----------------
@@ -926,17 +966,12 @@ class ApiService {
   }
 
   /// 轮询登录状态：801=等待扫码、802=已扫码待确认、803=登录成功、800=过期
-  /// 登录成功（803）时，服务端会返回登录 cookie，这里存入本地（独立登录态）。
-  static Future<int> loginQrCheck(String key) async {
+  /// 登录成功（803）时后端返回 cookie 整串，由调用方通过 setNeteaseCookie 保存
+  static Future<NeteaseQrCheckResult> loginQrCheck(String key) async {
     final data = await _getJson('/login/qr/check', {'key': key});
     final code = _asInt(data['code']);
-    if (code == 803) {
-      final cookie = data['cookie']?.toString();
-      if (cookie != null && cookie.isNotEmpty) {
-        _saveCookies({'set-cookie': cookie});
-      }
-    }
-    return code;
+    final cookie = data['cookie']?.toString() ?? '';
+    return NeteaseQrCheckResult(code, cookie);
   }
 
   /// 当前登录状态 + 用户信息

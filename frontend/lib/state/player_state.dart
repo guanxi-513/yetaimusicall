@@ -337,9 +337,21 @@ class PlayerState extends ChangeNotifier {
       } else {
         String playUrl;
         if (song.isBilibili) {
-          // B站 CDN 需带 bilibili Referer 防盗链，走服务器代理
-          playUrl = await ApiService.biliStreamUrl(song.bvid!);
-          await _player.setUrl(playUrl);
+          // B站源：优先带 Referer/UA/游客Cookie 直连 CDN（不占服务器流量）
+          final info = await ApiService.biliStreamUrl(song.bvid!);
+          if (info.directUrl.isNotEmpty) {
+            try {
+              await _player.setUrl(info.directUrl, headers: info.headers);
+              playUrl = info.directUrl;
+            } catch (e) {
+              debugPrint('B站直连失败，回退服务器代理：$e');
+              await _player.setUrl(info.url);
+              playUrl = info.url;
+            }
+          } else {
+            await _player.setUrl(info.url);
+            playUrl = info.url;
+          }
         } else if (song.isKugou) {
           // 酷狗：/kugou/song/url?hash=（免费128k，地址 2-4 小时时效实时请求）
           final info = await ApiService.kugouSongUrl(song.hash ?? '');

@@ -1,12 +1,17 @@
 /// 歌单 / 榜单详情页：大封面 + 榜单名/简介 + 曲目列表（带排名序号）
 library;
 
+import 'dart:ui' as ui show Image;
+import 'dart:ui' show ImageFilter;
+
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import '../config.dart';
 import '../models/song.dart';
 import '../services/api_service.dart';
+import '../services/page_snapshot.dart';
+import '../widgets/glass_background.dart';
 import '../widgets/song_tile.dart';
 
 class PlaylistDetailPage extends StatefulWidget {
@@ -52,6 +57,9 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
   bool _loading = true;
   String? _error;
 
+  /// 本地背景截图（进入时截取上一页画面，dispose 时释放）
+  ui.Image? _bgSnapshot;
+
   bool get _rankMode =>
       widget.initialSongs == null &&
       (widget.id != AppConfig.kHotPlaylistId ||
@@ -68,6 +76,21 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
     _name = widget.title ?? '';
     _cover = widget.cover ?? '';
     _load();
+    // 进入详情页时截取上一页画面作为模糊背景
+    _captureBg();
+  }
+
+  Future<void> _captureBg() async {
+    final shot = await capturePageSnapshot();
+    if (mounted && shot != null) {
+      setState(() => _bgSnapshot = shot);
+    }
+  }
+
+  @override
+  void dispose() {
+    _bgSnapshot?.dispose();
+    super.dispose();
   }
 
   Future<void> _load() async {
@@ -164,16 +187,38 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.transparent,
-      body: SafeArea(
-        bottom: false,
-        child: Column(
-          children: [
-            _buildHeader(),
-            Expanded(child: _buildBody()),
-          ],
-        ),
+    return RepaintBoundary(
+      key: detailSnapshotKey,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          // 背景：上一页截图模糊（无截图时用 GlassBackground 渐变兜底）
+          _bgSnapshot != null
+              ? Positioned.fill(
+                  child: ImageFiltered(
+                    imageFilter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+                    child: RawImage(image: _bgSnapshot, fit: BoxFit.cover),
+                  ),
+                )
+              : Positioned.fill(
+                  child: GlassBackground(child: const SizedBox.shrink()),
+                ),
+          // 深色遮罩
+          const ColoredBox(color: Color(0x40000000), child: SizedBox.expand()),
+          // 前景内容
+          Scaffold(
+            backgroundColor: Colors.transparent,
+            body: SafeArea(
+              bottom: false,
+              child: Column(
+                children: [
+                  _buildHeader(),
+                  Expanded(child: _buildBody()),
+                ],
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

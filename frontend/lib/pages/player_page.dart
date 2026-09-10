@@ -10,6 +10,7 @@ import 'package:provider/provider.dart';
 
 import '../config.dart';
 import '../models/song.dart';
+import '../services/page_snapshot.dart';
 import '../state/auth_state.dart';
 import '../state/player_state.dart';
 import '../widgets/glass_background.dart';
@@ -22,8 +23,7 @@ class PlayerPage extends StatefulWidget {
   State<PlayerPage> createState() => _PlayerPageState();
 }
 
-class _PlayerPageState extends State<PlayerPage>
-    with TickerProviderStateMixin {
+class _PlayerPageState extends State<PlayerPage> with TickerProviderStateMixin {
   final ScrollController _lyricController = ScrollController();
   int _lastLyricIndex = -1;
   bool _userScrolling = false;
@@ -75,6 +75,7 @@ class _PlayerPageState extends State<PlayerPage>
     _lyricController.dispose();
     _closeCtrl.dispose();
     _returnCtrl.dispose();
+    updatePageSnapshot(null); // 释放背景截图，防止退出后占内存
     super.dispose();
   }
 
@@ -104,89 +105,124 @@ class _PlayerPageState extends State<PlayerPage>
       child: AnimatedBuilder(
         animation: Listenable.merge([_closeCtrl, _returnCtrl]),
         // child 缓存：拖动/关闭动画只重算变换，不重建页面内容
-        child: GlassBackground(
-          child: Scaffold(
-            backgroundColor: Colors.transparent,
-            appBar: AppBar(
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            // 背景：上一页截图模糊（无截图时用 GlassBackground 渐变兜底）
+            cachedPageSnapshot != null
+                ? Positioned.fill(
+                    child: ImageFiltered(
+                      imageFilter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+                      child: RawImage(
+                        image: cachedPageSnapshot,
+                        fit: BoxFit.cover,
+                      ),
+                    ),
+                  )
+                : Positioned.fill(
+                    child: GlassBackground(child: const SizedBox.shrink()),
+                  ),
+            // 深色遮罩：保证前景文字可读
+            const ColoredBox(
+              color: Color(0x40000000),
+              child: SizedBox.expand(),
+            ),
+            // 前景内容（原 Scaffold，backgroundColor 保持 transparent）
+            Scaffold(
               backgroundColor: Colors.transparent,
-              elevation: 0,
-              centerTitle: true,
-              leading: IconButton(
-                icon: const Icon(Icons.keyboard_arrow_down,
-                    color: Colors.white, size: 32),
-                onPressed: () => Navigator.pop(context),
-              ),
-              title: Text(
-                song?.name ?? '未在播放',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
+              appBar: AppBar(
+                backgroundColor: Colors.transparent,
+                elevation: 0,
+                centerTitle: true,
+                leading: IconButton(
+                  icon: const Icon(
+                    Icons.keyboard_arrow_down,
+                    color: Colors.white,
+                    size: 32,
+                  ),
+                  onPressed: () => Navigator.pop(context),
                 ),
-              ),
-              actions: [
-                if (song != null) ...[
-                  // 音质选择按钮
-                  Padding(
-                    padding: const EdgeInsets.only(right: 4),
-                    child: IconButton(
-                      icon: Icon(Icons.high_quality,
-                          color: Colors.white.withOpacity(0.85), size: 24),
-                      tooltip:
-                          '音质：${_qualityLabel(AppConfig.audioQuality)}',
-                      onPressed: () => _showQualitySheet(context),
+                title: Text(
+                  song?.name ?? '未在播放',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                actions: [
+                  if (song != null) ...[
+                    // 音质选择按钮
+                    Padding(
+                      padding: const EdgeInsets.only(right: 4),
+                      child: IconButton(
+                        icon: Icon(
+                          Icons.high_quality,
+                          color: Colors.white.withOpacity(0.85),
+                          size: 24,
+                        ),
+                        tooltip: '音质：${_qualityLabel(AppConfig.audioQuality)}',
+                        onPressed: () => _showQualitySheet(context),
+                      ),
                     ),
-                  ),
-                  // 播放队列按钮
-                  Padding(
-                    padding: const EdgeInsets.only(right: 4),
-                    child: IconButton(
-                      icon: Icon(Icons.queue_music,
-                          color: Colors.white.withOpacity(0.85), size: 24),
-                      onPressed: () => _showQueueSheet(context, player),
+                    // 播放队列按钮
+                    Padding(
+                      padding: const EdgeInsets.only(right: 4),
+                      child: IconButton(
+                        icon: Icon(
+                          Icons.queue_music,
+                          color: Colors.white.withOpacity(0.85),
+                          size: 24,
+                        ),
+                        onPressed: () => _showQueueSheet(context, player),
+                      ),
                     ),
-                  ),
-                  // 爱心（点击弹跳 + 收藏切换）
-                  Padding(
-                    padding: const EdgeInsets.only(right: 8),
-                    child: _BouncingHeart(player: player, song: song),
-                  ),
+                    // 爱心（点击弹跳 + 收藏切换）
+                    Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: _BouncingHeart(player: player, song: song),
+                    ),
+                  ],
                 ],
-              ],
-            ),
-            body: SafeArea(
-              bottom: false,
-              child: song == null
-                  ? const Center(
-                      child: Text('没有正在播放的歌曲',
-                          style: TextStyle(color: Colors.white54)),
-                    )
-                  : OrientationBuilder(
-                      builder: (context, orientation) =>
-                          orientation == Orientation.landscape
-                              ? Row(
-                                  children: [
-                                    Expanded(
-                                      child:
-                                          _CoverDisc(song: song, player: player),
+              ),
+              body: SafeArea(
+                bottom: false,
+                child: song == null
+                    ? const Center(
+                        child: Text(
+                          '没有正在播放的歌曲',
+                          style: TextStyle(color: Colors.white54),
+                        ),
+                      )
+                    : OrientationBuilder(
+                        builder: (context, orientation) =>
+                            orientation == Orientation.landscape
+                            ? Row(
+                                children: [
+                                  Expanded(
+                                    child: _CoverDisc(
+                                      song: song,
+                                      player: player,
                                     ),
-                                    Expanded(
-                                        child: _buildRightPanel(player)),
-                                  ],
-                                )
-                              : _buildPortrait(player, song),
-                    ),
+                                  ),
+                                  Expanded(child: _buildRightPanel(player)),
+                                ],
+                              )
+                            : _buildPortrait(player, song),
+                      ),
+              ),
             ),
-          ),
+          ],
         ),
         builder: (context, child) {
           // 关闭动画时弹回动画不存在 → 用 _dy；弹回动画播放中 → 用插值
-          final dy =
-              _returnCtrl.isAnimating ? (_returnTween?.value ?? 0) : _dy;
+          final dy = _returnCtrl.isAnimating ? (_returnTween?.value ?? 0) : _dy;
           final progress = (dy / 400).clamp(0.0, 1.0); // 下拉进度
           final totalDy = dy + _closeCtrl.value * 500; // 关闭时继续下移出屏
-          final opacity =
-              (1.0 - progress - _closeCtrl.value * 0.5).clamp(0.0, 1.0);
+          final opacity = (1.0 - progress - _closeCtrl.value * 0.5).clamp(
+            0.0,
+            1.0,
+          );
           final scale = 1.0 - progress * 0.05;
           return Transform.translate(
             offset: Offset(0, totalDy),
@@ -235,8 +271,9 @@ class _PlayerPageState extends State<PlayerPage>
       child: Column(
         children: [
           _SongInfo(
-              song: player.currentDetail ?? player.current!,
-              quality: player.currentQuality),
+            song: player.currentDetail ?? player.current!,
+            quality: player.currentQuality,
+          ),
           const SizedBox(height: 16),
           _ProgressSection(player: player),
           const SizedBox(height: 8),
@@ -291,26 +328,26 @@ class _PlayerPageState extends State<PlayerPage>
           ),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(20),
-            child: BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
-              child: SafeArea(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Padding(
-                      padding: EdgeInsets.fromLTRB(20, 16, 20, 8),
-                      child: Text('播放音质',
-                          style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 15,
-                              fontWeight: FontWeight.w600)),
+            child: SafeArea(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Padding(
+                    padding: EdgeInsets.fromLTRB(20, 16, 20, 8),
+                    child: Text(
+                      '播放音质',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
-                    _qualityOption(ctx, 'standard', '标准 128k', '省流量，加载最快'),
-                    _qualityOption(ctx, 'high', '高品 320k', '音质与流量平衡（默认）'),
-                    _qualityOption(ctx, 'lossless', '无损 FLAC', '音质最佳，体积大'),
-                    const SizedBox(height: 12),
-                  ],
-                ),
+                  ),
+                  _qualityOption(ctx, 'standard', '标准 128k', '省流量，加载最快'),
+                  _qualityOption(ctx, 'high', '高品 320k', '音质与流量平衡（默认）'),
+                  _qualityOption(ctx, 'lossless', '无损 FLAC', '音质最佳，体积大'),
+                  const SizedBox(height: 12),
+                ],
               ),
             ),
           ),
@@ -321,7 +358,11 @@ class _PlayerPageState extends State<PlayerPage>
 
   /// 单个音质选项行
   Widget _qualityOption(
-      BuildContext sheetCtx, String q, String label, String desc) {
+    BuildContext sheetCtx,
+    String q,
+    String label,
+    String desc,
+  ) {
     final selected = AppConfig.audioQuality == q;
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 24),
@@ -335,10 +376,7 @@ class _PlayerPageState extends State<PlayerPage>
       ),
       subtitle: Text(
         desc,
-        style: TextStyle(
-          color: Colors.white.withOpacity(0.45),
-          fontSize: 11,
-        ),
+        style: TextStyle(color: Colors.white.withOpacity(0.45), fontSize: 11),
       ),
       trailing: selected
           ? const Icon(Icons.check_circle, color: Color(0xFFE05A8A), size: 20)
@@ -366,186 +404,206 @@ class _PlayerPageState extends State<PlayerPage>
           ),
           child: ClipRRect(
             borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-            child: BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
-              child: Container(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [
-                      Colors.white.withOpacity(0.18),
-                      Colors.white.withOpacity(0.06),
-                    ],
-                  ),
-                  border: Border.all(
-                      color: Colors.white.withOpacity(0.25), width: 1),
-                  borderRadius:
-                      const BorderRadius.vertical(top: Radius.circular(24)),
-                ),
-                child: Column(
-                  children: [
-                    // 拖拽指示条
-                    Container(
-                      margin: const EdgeInsets.only(top: 10, bottom: 6),
-                      width: 40,
-                      height: 4,
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.3),
-                        borderRadius: BorderRadius.circular(2),
-                      ),
-                    ),
-                    // 标题行
-                    Padding(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 20, vertical: 8),
-                      child: Row(
-                        children: [
-                          Icon(Icons.queue_music,
-                              color: Colors.white.withOpacity(0.8), size: 20),
-                          const SizedBox(width: 8),
-                          Text('播放队列',
-                              style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w700)),
-                          const Spacer(),
-                          Text('共 ${queue.length} 首',
-                              style: TextStyle(
-                                  color: Colors.white.withOpacity(0.55),
-                                  fontSize: 13)),
-                        ],
-                      ),
-                    ),
-                    Divider(
-                        color: Colors.white.withOpacity(0.12), height: 1),
-                    // 列表
-                    Expanded(
-                      child: queue.isEmpty
-                          ? Center(
-                              child: Text('队列为空',
-                                  style: TextStyle(
-                                      color:
-                                          Colors.white.withOpacity(0.4))))
-                          : ListView.builder(
-                              padding:
-                                  const EdgeInsets.symmetric(vertical: 4),
-                              itemCount: queue.length,
-                              itemBuilder: (ctx, i) {
-                                final s = queue[i];
-                                final isCurrent = i == player.index;
-                                return GestureDetector(
-                                  onTap: () {
-                                    player.playAt(i);
-                                    Navigator.pop(ctx);
-                                  },
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 16, vertical: 8),
-                                    color: isCurrent
-                                        ? Colors.white.withOpacity(0.10)
-                                        : null,
-                                    child: Row(
-                                      children: [
-                                        // 小封面
-                                        Container(
-                                          width: 36,
-                                          height: 36,
-                                          decoration: BoxDecoration(
-                                            borderRadius:
-                                                BorderRadius.circular(8),
-                                            border: Border.all(
-                                                color: Colors.white
-                                                    .withOpacity(0.25)),
-                                          ),
-                                          child: ClipRRect(
-                                            borderRadius:
-                                                BorderRadius.circular(8),
-                                            child: s.cover.isEmpty
-                                                ? Container(
-                                                    color: Colors.white
-                                                        .withOpacity(0.08),
-                                                    child: Icon(
-                                                        Icons.music_note,
-                                                        color: Colors.white
-                                                            .withOpacity(0.4),
-                                                        size: 16),
-                                                  )
-                                                : CachedNetworkImage(
-                                                    imageUrl: s.cover,
-                                                    fit: BoxFit.cover,
-                                                    width: 36,
-                                                    height: 36,
-                                                    placeholder: (_, __) =>
-                                                        Container(
-                                                            color: Colors
-                                                                    .white
-                                                                .withOpacity(
-                                                                    0.08)),
-                                                    errorWidget: (_, __, ___) =>
-                                                        Container(
-                                                      color: Colors.white
-                                                          .withOpacity(0.08),
-                                                      child: Icon(
-                                                          Icons.music_note,
-                                                          color: Colors.white
-                                                              .withOpacity(
-                                                                  0.4),
-                                                          size: 16),
-                                                    ),
-                                                  ),
-                                          ),
-                                        ),
-                                        const SizedBox(width: 10),
-                                        Expanded(
-                                          child: Column(
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.start,
-                                            children: [
-                                              Text(
-                                                s.name,
-                                                maxLines: 1,
-                                                overflow:
-                                                    TextOverflow.ellipsis,
-                                                style: TextStyle(
-                                                  color: isCurrent
-                                                      ? Colors.white
-                                                      : Colors.white
-                                                          .withOpacity(0.75),
-                                                  fontSize: 13,
-                                                  fontWeight: isCurrent
-                                                      ? FontWeight.w700
-                                                      : FontWeight.w500,
-                                                ),
-                                              ),
-                                              const SizedBox(height: 2),
-                                              Text(
-                                                s.artistText,
-                                                maxLines: 1,
-                                                overflow:
-                                                    TextOverflow.ellipsis,
-                                                style: TextStyle(
-                                                    color: Colors.white
-                                                        .withOpacity(0.45),
-                                                    fontSize: 11),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                        if (isCurrent)
-                                          Icon(Icons.graphic_eq,
-                                              color: Colors.white
-                                                  .withOpacity(0.8),
-                                              size: 18),
-                                      ],
-                                    ),
-                                  ),
-                                );
-                              },
-                            ),
-                    ),
+            child: Container(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    Colors.white.withOpacity(0.18),
+                    Colors.white.withOpacity(0.06),
                   ],
                 ),
+                border: Border.all(
+                  color: Colors.white.withOpacity(0.25),
+                  width: 1,
+                ),
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(24),
+                ),
+              ),
+              child: Column(
+                children: [
+                  // 拖拽指示条
+                  Container(
+                    margin: const EdgeInsets.only(top: 10, bottom: 6),
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.3),
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                  // 标题行
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 8,
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.queue_music,
+                          color: Colors.white.withOpacity(0.8),
+                          size: 20,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          '播放队列',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const Spacer(),
+                        Text(
+                          '共 ${queue.length} 首',
+                          style: TextStyle(
+                            color: Colors.white.withOpacity(0.55),
+                            fontSize: 13,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Divider(color: Colors.white.withOpacity(0.12), height: 1),
+                  // 列表
+                  Expanded(
+                    child: queue.isEmpty
+                        ? Center(
+                            child: Text(
+                              '队列为空',
+                              style: TextStyle(
+                                color: Colors.white.withOpacity(0.4),
+                              ),
+                            ),
+                          )
+                        : ListView.builder(
+                            padding: const EdgeInsets.symmetric(vertical: 4),
+                            itemCount: queue.length,
+                            itemBuilder: (ctx, i) {
+                              final s = queue[i];
+                              final isCurrent = i == player.index;
+                              return GestureDetector(
+                                onTap: () {
+                                  player.playAt(i);
+                                  Navigator.pop(ctx);
+                                },
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                    vertical: 8,
+                                  ),
+                                  color: isCurrent
+                                      ? Colors.white.withOpacity(0.10)
+                                      : null,
+                                  child: Row(
+                                    children: [
+                                      // 小封面
+                                      Container(
+                                        width: 36,
+                                        height: 36,
+                                        decoration: BoxDecoration(
+                                          borderRadius: BorderRadius.circular(
+                                            8,
+                                          ),
+                                          border: Border.all(
+                                            color: Colors.white.withOpacity(
+                                              0.25,
+                                            ),
+                                          ),
+                                        ),
+                                        child: ClipRRect(
+                                          borderRadius: BorderRadius.circular(
+                                            8,
+                                          ),
+                                          child: s.cover.isEmpty
+                                              ? Container(
+                                                  color: Colors.white
+                                                      .withOpacity(0.08),
+                                                  child: Icon(
+                                                    Icons.music_note,
+                                                    color: Colors.white
+                                                        .withOpacity(0.4),
+                                                    size: 16,
+                                                  ),
+                                                )
+                                              : CachedNetworkImage(
+                                                  imageUrl: s.cover,
+                                                  fit: BoxFit.cover,
+                                                  width: 36,
+                                                  height: 36,
+                                                  placeholder: (_, __) =>
+                                                      Container(
+                                                        color: Colors.white
+                                                            .withOpacity(0.08),
+                                                      ),
+                                                  errorWidget: (_, __, ___) =>
+                                                      Container(
+                                                        color: Colors.white
+                                                            .withOpacity(0.08),
+                                                        child: Icon(
+                                                          Icons.music_note,
+                                                          color: Colors.white
+                                                              .withOpacity(0.4),
+                                                          size: 16,
+                                                        ),
+                                                      ),
+                                                ),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 10),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              s.name,
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: TextStyle(
+                                                color: isCurrent
+                                                    ? Colors.white
+                                                    : Colors.white.withOpacity(
+                                                        0.75,
+                                                      ),
+                                                fontSize: 13,
+                                                fontWeight: isCurrent
+                                                    ? FontWeight.w700
+                                                    : FontWeight.w500,
+                                              ),
+                                            ),
+                                            const SizedBox(height: 2),
+                                            Text(
+                                              s.artistText,
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: TextStyle(
+                                                color: Colors.white.withOpacity(
+                                                  0.45,
+                                                ),
+                                                fontSize: 11,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      if (isCurrent)
+                                        Icon(
+                                          Icons.graphic_eq,
+                                          color: Colors.white.withOpacity(0.8),
+                                          size: 18,
+                                        ),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                  ),
+                ],
               ),
             ),
           ),
@@ -585,21 +643,20 @@ class _CoverDisc extends StatelessWidget {
               ],
             ),
             child: ClipOval(
-              child: BackdropFilter(
-                filter: ImageFilter.blur(sigmaX: 22, sigmaY: 22),
-                child: Container(
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    gradient: LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: [
-                        Colors.white.withOpacity(0.20),
-                        Colors.white.withOpacity(0.05),
-                      ],
-                    ),
-                    border: Border.all(
-                        color: Colors.white.withOpacity(0.32), width: 1.2),
+              child: Container(
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      Colors.white.withOpacity(0.20),
+                      Colors.white.withOpacity(0.05),
+                    ],
+                  ),
+                  border: Border.all(
+                    color: Colors.white.withOpacity(0.32),
+                    width: 1.2,
                   ),
                 ),
               ),
@@ -611,15 +668,20 @@ class _CoverDisc extends StatelessWidget {
             height: size,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              border:
-                  Border.all(color: Colors.white.withOpacity(0.25), width: 1),
+              border: Border.all(
+                color: Colors.white.withOpacity(0.25),
+                width: 1,
+              ),
             ),
             child: ClipOval(
               child: song.cover.isEmpty
                   ? Container(
                       color: const Color(0xFF2A2050),
-                      child: Icon(Icons.music_note,
-                          color: Colors.white.withOpacity(0.5), size: size / 3),
+                      child: Icon(
+                        Icons.music_note,
+                        color: Colors.white.withOpacity(0.5),
+                        size: size / 3,
+                      ),
                     )
                   : CachedNetworkImage(
                       imageUrl: song.cover,
@@ -633,15 +695,19 @@ class _CoverDisc extends StatelessWidget {
                             child: CircularProgressIndicator(
                               strokeWidth: 2,
                               valueColor: AlwaysStoppedAnimation(
-                                  Colors.white.withOpacity(0.6)),
+                                Colors.white.withOpacity(0.6),
+                              ),
                             ),
                           ),
                         ),
                       ),
                       errorWidget: (_, __, ___) => Container(
                         color: const Color(0xFF2A2050),
-                        child: Icon(Icons.music_note,
-                            color: Colors.white.withOpacity(0.5), size: size / 3),
+                        child: Icon(
+                          Icons.music_note,
+                          color: Colors.white.withOpacity(0.5),
+                          size: size / 3,
+                        ),
                       ),
                     ),
             ),
@@ -732,8 +798,9 @@ class _ProgressSectionState extends State<_ProgressSection> {
     final posMs = _dragValue ?? player.position.inMilliseconds;
     final bufferedMs = player.buffered.inMilliseconds;
     final ratio = totalMs > 0 ? (posMs / totalMs).clamp(0.0, 1.0) : 0.0;
-    final bufferedRatio =
-        totalMs > 0 ? (bufferedMs / totalMs).clamp(0.0, 1.0) : 0.0;
+    final bufferedRatio = totalMs > 0
+        ? (bufferedMs / totalMs).clamp(0.0, 1.0)
+        : 0.0;
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 28),
@@ -745,9 +812,19 @@ class _ProgressSectionState extends State<_ProgressSection> {
               return GestureDetector(
                 behavior: HitTestBehavior.opaque,
                 onHorizontalDragStart: (d) => setState(
-                    () => _dragValue = _posFromDx(d.localPosition.dx, width, totalMs)),
+                  () => _dragValue = _posFromDx(
+                    d.localPosition.dx,
+                    width,
+                    totalMs,
+                  ),
+                ),
                 onHorizontalDragUpdate: (d) => setState(
-                    () => _dragValue = _posFromDx(d.localPosition.dx, width, totalMs)),
+                  () => _dragValue = _posFromDx(
+                    d.localPosition.dx,
+                    width,
+                    totalMs,
+                  ),
+                ),
                 onHorizontalDragEnd: (_) {
                   if (_dragValue != null && totalMs > 0) {
                     player.seek(Duration(milliseconds: _dragValue!.round()));
@@ -756,9 +833,15 @@ class _ProgressSectionState extends State<_ProgressSection> {
                 },
                 onTapUp: (d) {
                   if (totalMs > 0) {
-                    player.seek(Duration(
-                        milliseconds:
-                            _posFromDx(d.localPosition.dx, width, totalMs).round()));
+                    player.seek(
+                      Duration(
+                        milliseconds: _posFromDx(
+                          d.localPosition.dx,
+                          width,
+                          totalMs,
+                        ).round(),
+                      ),
+                    );
                   }
                 },
                 child: SizedBox(
@@ -769,36 +852,30 @@ class _ProgressSectionState extends State<_ProgressSection> {
                       width: double.infinity,
                       child: ClipRRect(
                         borderRadius: BorderRadius.circular(5),
-                        child: BackdropFilter(
-                          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-                          child: Stack(
-                            children: [
-                              // 底轨（磨砂）
-                              Container(
-                                color: Colors.white.withOpacity(0.14),
+                        child: Stack(
+                          children: [
+                            // 底轨（磨砂）
+                            Container(color: Colors.white.withOpacity(0.14)),
+                            // 缓冲
+                            FractionallySizedBox(
+                              widthFactor: bufferedRatio,
+                              child: Container(
+                                color: Colors.white.withOpacity(0.28),
                               ),
-                              // 缓冲
-                              FractionallySizedBox(
-                                widthFactor: bufferedRatio,
-                                child: Container(
-                                  color: Colors.white.withOpacity(0.28),
-                                ),
-                              ),
-                              // 已播放
-                              FractionallySizedBox(
-                                widthFactor: ratio,
-                                child: Container(
-                                  decoration: BoxDecoration(
-                                    gradient: const LinearGradient(colors: [
-                                      Colors.white70,
-                                      Colors.white,
-                                    ]),
-                                    borderRadius: BorderRadius.circular(5),
+                            ),
+                            // 已播放
+                            FractionallySizedBox(
+                              widthFactor: ratio,
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  gradient: const LinearGradient(
+                                    colors: [Colors.white70, Colors.white],
                                   ),
+                                  borderRadius: BorderRadius.circular(5),
                                 ),
                               ),
-                            ],
-                          ),
+                            ),
+                          ],
                         ),
                       ),
                     ),
@@ -814,13 +891,17 @@ class _ProgressSectionState extends State<_ProgressSection> {
               Text(
                 _fmt(posMs),
                 style: TextStyle(
-                    color: Colors.white.withOpacity(0.55), fontSize: 11),
+                  color: Colors.white.withOpacity(0.55),
+                  fontSize: 11,
+                ),
               ),
               if (player.loading)
                 Text(
                   '缓冲中…',
                   style: TextStyle(
-                      color: Colors.white.withOpacity(0.45), fontSize: 11),
+                    color: Colors.white.withOpacity(0.45),
+                    fontSize: 11,
+                  ),
                 ),
               if (player.error != null)
                 Flexible(
@@ -828,13 +909,18 @@ class _ProgressSectionState extends State<_ProgressSection> {
                     player.error!,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(color: Color(0xFFE05A8A), fontSize: 11),
+                    style: const TextStyle(
+                      color: Color(0xFFE05A8A),
+                      fontSize: 11,
+                    ),
                   ),
                 ),
               Text(
                 _fmt(totalMs),
                 style: TextStyle(
-                    color: Colors.white.withOpacity(0.55), fontSize: 11),
+                  color: Colors.white.withOpacity(0.55),
+                  fontSize: 11,
+                ),
               ),
             ],
           ),
@@ -1034,23 +1120,20 @@ class _LyricsPanelState extends State<_LyricsPanel> {
       ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(24),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
-          child: Container(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [
-                  Colors.white.withOpacity(0.10),
-                  Colors.white.withOpacity(0.04),
-                ],
-              ),
-              border: Border.all(color: Colors.white.withOpacity(0.20), width: 1),
-              borderRadius: BorderRadius.circular(24),
+        child: Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [
+                Colors.white.withOpacity(0.10),
+                Colors.white.withOpacity(0.04),
+              ],
             ),
-            child: panelChild,
+            border: Border.all(color: Colors.white.withOpacity(0.20), width: 1),
+            borderRadius: BorderRadius.circular(24),
           ),
+          child: panelChild,
         ),
       ),
     );
@@ -1081,13 +1164,11 @@ class _PlayModeBar extends StatelessWidget {
             },
             behavior: HitTestBehavior.opaque,
             child: Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
               decoration: BoxDecoration(
                 color: Colors.white.withOpacity(0.10),
                 borderRadius: BorderRadius.circular(16),
-                border:
-                    Border.all(color: Colors.white.withOpacity(0.22)),
+                border: Border.all(color: Colors.white.withOpacity(0.22)),
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
@@ -1144,8 +1225,10 @@ Route<T> playerRoute<T>() {
     reverseTransitionDuration: const Duration(milliseconds: 280),
     pageBuilder: (_, anim, __) => const PlayerPage(),
     transitionsBuilder: (_, anim, __, child) {
-      final tween = Tween(begin: const Offset(0, 1), end: Offset.zero)
-          .chain(CurveTween(curve: Curves.easeOutCubic));
+      final tween = Tween(
+        begin: const Offset(0, 1),
+        end: Offset.zero,
+      ).chain(CurveTween(curve: Curves.easeOutCubic));
       return SlideTransition(position: anim.drive(tween), child: child);
     },
   );
@@ -1174,8 +1257,10 @@ class _BouncingHeartState extends State<_BouncingHeart> {
       if (mounted) setState(() => _pulse = false);
     });
     final loggedIn = context.read<AuthState>().loggedIn;
-    final result =
-        await widget.player.toggleFavorite(widget.song, loggedIn: loggedIn);
+    final result = await widget.player.toggleFavorite(
+      widget.song,
+      loggedIn: loggedIn,
+    );
     _busy = false;
     if (!mounted) return;
     // B站/酷狗歌只做本地收藏，无提示；'ok' 已同步网易云，静默
