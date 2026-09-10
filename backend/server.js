@@ -1532,6 +1532,15 @@ const server = http.createServer(async (req, res) => {
     })
   }
 
+  // 网易云登录态接口：请求必须自带 cookie，无 cookie 直接返回未登录。
+  // 不读全局 cookie.txt —— 防止未登录设备看到"最后登录者"的歌单/头像/日推（隐私隔离）
+  const NCM_AUTH_ROUTES = new Set([
+    'status', 'logout', 'user/playlist', 'like', 'likelist', 'recommend', 'radar',
+  ])
+  if (NCM_AUTH_ROUTES.has(name) && !(req.headers.cookie || '').trim()) {
+    return send(res, 401, { code: 401, message: '未登录，请先扫码登录' })
+  }
+
   // 以请求自带的 Cookie 为上下文执行 handler（多设备独立登录态）
   als.run({ cookie: req.headers.cookie || '' }, async () => {
     try {
