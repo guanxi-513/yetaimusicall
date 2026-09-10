@@ -6,7 +6,8 @@ plugins {
 
 android {
     namespace = "com.nini.liquid_music"
-    compileSdk = flutter.compileSdkVersion
+    // 显式 36：shared_preferences_android / sqflite_android 要求 compileSdk 36+
+    compileSdk = 36
     ndkVersion = flutter.ndkVersion
 
     compileOptions {

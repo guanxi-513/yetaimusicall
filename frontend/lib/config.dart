@@ -9,6 +9,15 @@ library;
 
 import 'package:shared_preferences/shared_preferences.dart';
 
+/// 网易云图片 CDN 请求头
+///
+/// p1.music.126.net 等节点会拒绝 Dart 默认 UA（HttpClient "Dart/x.x" → 403），
+/// 加载网易云图片（封面/头像）时必须带上浏览器 UA。
+const Map<String, String> kImageHttpHeaders = {
+  'User-Agent':
+      'Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36',
+};
+
 class AppConfig {
   AppConfig._();
 

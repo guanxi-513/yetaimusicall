@@ -10,15 +10,34 @@ import '../services/api_service.dart';
 import '../widgets/song_tile.dart';
 
 class PlaylistDetailPage extends StatefulWidget {
-  final String id;
+  /// 歌单 id（为 null 时直接展示 [initialSongs]，不发网络请求）
+  final String? id;
   final String? title;
   final String? cover;
 
+  /// 预置歌曲（如"每日推荐"详情：非歌单接口数据，直接展示）
+  final List<Song>? initialSongs;
+
+  /// 音源：'netease'（默认）| 'kugou'（酷狗歌单走 /kugou/playlist/detail）
+  /// | 'qq'（QQ 歌单走 /qq/playlist/detail）| 'soda'（汽水歌单走 /soda/playlist/detail）
+  final String source;
+
+  /// 换一批回调（"猜你喜欢"流式推荐用；提供后刷新按钮调用它替换歌曲列表）
+  final Future<List<Song>> Function()? onRefetch;
+
+  /// 刷新回调（预置歌曲列表用，如 QQ 我喜欢：刷新时重新拉后端）
+  /// 提供后刷新按钮调用它替换歌曲列表；为空时预置模式刷新仅重设状态
+  final Future<List<Song>> Function()? onRefresh;
+
   const PlaylistDetailPage({
     super.key,
-    required this.id,
+    this.id,
     this.title,
     this.cover,
+    this.initialSongs,
+    this.source = 'netease',
+    this.onRefetch,
+    this.onRefresh,
   });
 
   @override
@@ -33,12 +52,15 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
   bool _loading = true;
   String? _error;
 
-  bool get _rankMode => widget.id != AppConfig.kHotPlaylistId ||
-      (_name.contains('榜') || _desc.contains('榜'));
+  bool get _rankMode =>
+      widget.initialSongs == null &&
+      (widget.id != AppConfig.kHotPlaylistId ||
+          (_name.contains('榜') || _desc.contains('榜')));
 
   /// 网易云"我喜欢的音乐"歌单（含用户改名的 *喜欢的音乐）：
-  /// 红心 = 仅云端喜欢，取消后从列表移除
-  bool get _isCloudLikedList => _name.contains('喜欢的音乐');
+  /// 红心 = 仅云端喜欢，取消后从列表移除（酷狗/QQ歌单无云端喜欢，不适用）
+  bool get _isCloudLikedList =>
+      widget.source == 'netease' && _name.contains('喜欢的音乐');
 
   @override
   void initState() {
@@ -49,23 +71,93 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
   }
 
   Future<void> _load() async {
+    // 「换一批」模式（猜你喜欢）：回调拉新一批替换列表
+    if (widget.onRefetch != null) {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+      try {
+        final songs = await widget.onRefetch!();
+        if (!mounted) return;
+        setState(() {
+          _songs = songs;
+          _loading = false;
+        });
+      } catch (e) {
+        if (!mounted) return;
+        setState(() {
+          _loading = false;
+          _error = '加载失败：$e';
+        });
+      }
+      return;
+    }
+    // 预置歌曲模式（每日推荐详情）：直接展示，不发网络请求
+    if (widget.initialSongs != null) {
+      // 提供 onRefresh（如 QQ 我喜欢）时刷新 = 重新拉后端，否则仅重设
+      if (widget.onRefresh != null) {
+        setState(() {
+          _loading = true;
+          _error = null;
+        });
+        try {
+          final songs = await widget.onRefresh!();
+          if (!mounted) return;
+          setState(() {
+            _songs = songs;
+            _loading = false;
+          });
+        } catch (e) {
+          if (!mounted) return;
+          setState(() {
+            _loading = false;
+            _error = e is NotLoggedInException ? '登录态已失效，请重新登录' : '加载失败：$e';
+          });
+        }
+        return;
+      }
+      setState(() {
+        _songs = widget.initialSongs!;
+        _loading = false;
+        _error = null;
+      });
+      return;
+    }
     setState(() {
       _loading = true;
       _error = null;
     });
     try {
-      final r = await ApiService.playlistDetail(widget.id);
-      setState(() {
+      if (widget.source == 'soda') {
+        // 汽水详情返回创建者（creator），若没简介则显示"创建者：xxx"
+        final s = await ApiService.sodaPlaylistDetail(widget.id!);
+        _songs = s.tracks;
+        if (s.name.isNotEmpty) _name = s.name;
+        if (s.cover.isNotEmpty) _cover = s.cover;
+        _desc = s.description.isNotEmpty
+            ? s.description
+            : (s.creator.isNotEmpty ? '创建者：${s.creator}' : '');
+      } else {
+        final r = switch (widget.source) {
+          'kugou' => await ApiService.kugouPlaylistDetail(widget.id!),
+          'qq' => await ApiService.qqPlaylistDetail(widget.id!),
+          _ => await ApiService.playlistDetail(widget.id!),
+        };
         _songs = r.tracks;
         if (r.name.isNotEmpty) _name = r.name;
         if (r.cover.isNotEmpty) _cover = r.cover;
         _desc = r.description;
+      }
+      if (!mounted) return;
+      setState(() {
         _loading = false;
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _loading = false;
-        _error = '加载失败：$e';
+        _error = e is NotLoggedInException ? '登录态已失效，请重新登录' : '加载失败：$e';
       });
     }
   }
@@ -100,11 +192,16 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 color: Colors.white.withOpacity(0.12),
-                border:
-                    Border.all(color: Colors.white.withOpacity(0.28), width: 1),
+                border: Border.all(
+                  color: Colors.white.withOpacity(0.28),
+                  width: 1,
+                ),
               ),
-              child: Icon(Icons.arrow_back,
-                  color: Colors.white.withOpacity(0.9), size: 20),
+              child: Icon(
+                Icons.arrow_back,
+                color: Colors.white.withOpacity(0.9),
+                size: 20,
+              ),
             ),
           ),
           const SizedBox(width: 12),
@@ -128,11 +225,16 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 color: Colors.white.withOpacity(0.12),
-                border:
-                    Border.all(color: Colors.white.withOpacity(0.28), width: 1),
+                border: Border.all(
+                  color: Colors.white.withOpacity(0.28),
+                  width: 1,
+                ),
               ),
-              child: Icon(Icons.refresh,
-                  color: Colors.white.withOpacity(0.9), size: 18),
+              child: Icon(
+                Icons.refresh,
+                color: Colors.white.withOpacity(0.9),
+                size: 18,
+              ),
             ),
           ),
         ],
@@ -169,27 +271,24 @@ class _PlaylistDetailPageState extends State<PlaylistDetailPage> {
         SliverPadding(
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
           sliver: SliverList(
-            delegate: SliverChildBuilderDelegate(
-              (context, i) {
-                final song = _songs[i];
-                return SongTile(
-                  song: song,
-                  queue: _songs,
-                  index: i + 1,
-                  rankMode: _rankMode,
-                  // 「我喜欢的音乐」：红心 = 仅云端，取消后移出列表
-                  heartMode: _isCloudLikedList
-                      ? HeartMode.cloud
-                      : HeartMode.global,
-                  onCloudUnlike: _isCloudLikedList
-                      ? () => setState(() {
-                            _songs.removeWhere((s) => s.id == song.id);
-                          })
-                      : null,
-                );
-              },
-              childCount: _songs.length,
-            ),
+            delegate: SliverChildBuilderDelegate((context, i) {
+              final song = _songs[i];
+              return SongTile(
+                song: song,
+                queue: _songs,
+                index: i + 1,
+                rankMode: _rankMode,
+                // 「我喜欢的音乐」：红心 = 仅云端，取消后移出列表
+                heartMode: _isCloudLikedList
+                    ? HeartMode.cloud
+                    : HeartMode.global,
+                onCloudUnlike: _isCloudLikedList
+                    ? () => setState(() {
+                        _songs.removeWhere((s) => s.id == song.id);
+                      })
+                    : null,
+              );
+            }, childCount: _songs.length),
           ),
         ),
       ],
@@ -224,8 +323,10 @@ class _BigHeader extends StatelessWidget {
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               color: Colors.white.withOpacity(0.10),
-              border:
-                  Border.all(color: Colors.white.withOpacity(0.3), width: 1),
+              border: Border.all(
+                color: Colors.white.withOpacity(0.3),
+                width: 1,
+              ),
               boxShadow: [
                 BoxShadow(
                   color: Colors.black.withOpacity(0.3),
@@ -238,18 +339,26 @@ class _BigHeader extends StatelessWidget {
               child: cover.isEmpty
                   ? Container(
                       color: Colors.white.withOpacity(0.10),
-                      child: Icon(Icons.album,
-                          color: Colors.white.withOpacity(0.6), size: 40),
+                      child: Icon(
+                        Icons.album,
+                        color: Colors.white.withOpacity(0.6),
+                        size: 40,
+                      ),
                     )
                   : CachedNetworkImage(
                       imageUrl: cover,
                       fit: BoxFit.cover,
+                      // p1.music.126.net 拒绝 Dart 默认 UA（403），必须带浏览器 UA
+                      httpHeaders: kImageHttpHeaders,
                       placeholder: (_, __) =>
                           Container(color: Colors.white.withOpacity(0.10)),
                       errorWidget: (_, __, ___) => Container(
                         color: Colors.white.withOpacity(0.10),
-                        child: Icon(Icons.album,
-                            color: Colors.white.withOpacity(0.6), size: 40),
+                        child: Icon(
+                          Icons.album,
+                          color: Colors.white.withOpacity(0.6),
+                          size: 40,
+                        ),
                       ),
                     ),
             ),
@@ -313,7 +422,11 @@ class _ErrorView extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.cloud_off, color: Colors.white.withOpacity(0.4), size: 48),
+            Icon(
+              Icons.cloud_off,
+              color: Colors.white.withOpacity(0.4),
+              size: 48,
+            ),
             const SizedBox(height: 16),
             Text(
               message,

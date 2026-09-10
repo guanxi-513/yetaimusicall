@@ -43,3 +43,26 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# 工作区记忆（隐私，绝不上传）
+.workbuddy/
+
+# 开发过程文档/任务书（不发 GitHub）
+CONTEXT.md
+*_TASK.md
+*_TASK_PATCH.md
+歌词歌手修复-前端提示词.md
+docs/
+
+# 临时/调试文件
+an3.txt
+kg_daily.json
+fl.sh
+liquid_music.iml
+
+# Android 本机配置与构建产物
+android/local.properties
+android/build/
+android/.gradle/
+android/key.properties
+android/app/release/

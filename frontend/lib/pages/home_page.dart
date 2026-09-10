@@ -30,6 +30,7 @@ class _HomePageState extends State<HomePage> {
   ///   使"我喜欢的音乐"歌单内歌曲默认点亮爱心、点一下直接取消云端喜欢
   /// - 退出登录 → 清空云端喜欢集合
   bool? _lastLoggedIn;
+  bool? _lastQQLoggedIn;
 
   static const _titles = ['推荐', '搜索', '榜单', '我的'];
 
@@ -44,6 +45,14 @@ class _HomePageState extends State<HomePage> {
     } else if (!auth.loggedIn && _lastLoggedIn != false) {
       _lastLoggedIn = false;
       player.clearCloudFavorites();
+    }
+    // QQ 登录态切换：登录后拉取「我喜欢」songId 集合，退出后清空
+    if (auth.qqLoggedIn && _lastQQLoggedIn != true) {
+      _lastQQLoggedIn = true;
+      player.loadQqFavorites();
+    } else if (!auth.qqLoggedIn && _lastQQLoggedIn != false) {
+      _lastQQLoggedIn = false;
+      player.clearQqFavorites();
     }
   }
 
@@ -60,6 +69,11 @@ class _HomePageState extends State<HomePage> {
             tabIndex: _tab,
             onTabChanged: (i) => setState(() => _tab = i),
             avatarUrl: auth.user?.avatar,
+            // 任一音源（网易云/酷狗/QQ/汽水）已登录：显示用户图标（区别于设置图标）
+            anyLoggedIn: auth.loggedIn ||
+                auth.kugouLoggedIn ||
+                auth.qqLoggedIn ||
+                auth.sodaLoggedIn,
             onAvatarTap: () => _showSettings(context),
           ),
           // 内容区
@@ -91,6 +105,7 @@ class _GlassNavBar extends StatelessWidget {
   final int tabIndex;
   final ValueChanged<int> onTabChanged;
   final String? avatarUrl;
+  final bool anyLoggedIn;
   final VoidCallback onAvatarTap;
 
   const _GlassNavBar({
@@ -98,6 +113,7 @@ class _GlassNavBar extends StatelessWidget {
     required this.tabIndex,
     required this.onTabChanged,
     required this.avatarUrl,
+    required this.anyLoggedIn,
     required this.onAvatarTap,
   });
 
@@ -207,8 +223,11 @@ class _GlassNavBar extends StatelessWidget {
                                   size: 18),
                             ),
                           )
-                        : Icon(Icons.settings,
-                            color: Colors.white.withOpacity(0.85), size: 18),
+                        : Icon(
+                            // 已有任一音源登录 → 用户图标；否则设置图标
+                            anyLoggedIn ? Icons.person : Icons.settings,
+                            color: Colors.white.withOpacity(0.85),
+                            size: 18),
                   ),
                 ),
               ],
@@ -310,7 +329,10 @@ class _SettingsDialogState extends State<_SettingsDialog> {
   }
 
   Widget _buildUserSection(AuthState auth) {
-    if (auth.checking) {
+    if (auth.checking ||
+      auth.kugouChecking ||
+      auth.qqChecking ||
+      auth.sodaChecking) {
       return const Row(
         children: [
           SizedBox(
@@ -325,91 +347,114 @@ class _SettingsDialogState extends State<_SettingsDialog> {
         ],
       );
     }
-    if (auth.loggedIn && auth.user != null) {
-      final u = auth.user!;
-      return Row(
-        children: [
-          Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              border:
-                  Border.all(color: Colors.white.withOpacity(0.4), width: 1),
-            ),
-            child: ClipOval(
-              child: u.avatar.isEmpty
-                  ? Icon(Icons.person, color: Colors.white.withOpacity(0.7))
-                  : CachedNetworkImage(
-                      imageUrl: u.avatar,
-                      fit: BoxFit.cover,
-                      placeholder: (_, __) =>
-                          Icon(Icons.person, color: Colors.white.withOpacity(0.7)),
-                      errorWidget: (_, __, ___) => Icon(Icons.person,
-                          color: Colors.white.withOpacity(0.7)),
-                    ),
-            ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // ---- 网易云账号 ----
+        if (auth.loggedIn && auth.user != null) _buildNeteaseRow(auth)
+        else _buildNeteaseLoginEntry(),
+        // ---- 酷狗账号 ----
+        const SizedBox(height: 12),
+        if (auth.kugouLoggedIn) _buildKugouRow(auth)
+        else _buildKugouLoginEntry(),
+        // ---- QQ 账号 ----
+        const SizedBox(height: 12),
+        if (auth.qqLoggedIn) _buildQQRow(auth)
+        else _buildQQLoginEntry(),
+        // ---- 汽水账号 ----
+        const SizedBox(height: 12),
+        if (auth.sodaLoggedIn) _buildSodaRow(auth)
+        else _buildSodaLoginEntry(),
+      ],
+    );
+  }
+
+  /// 网易云已登录：头像 + 昵称 + 退出
+  Widget _buildNeteaseRow(AuthState auth) {
+    final u = auth.user!;
+    return Row(
+      children: [
+        Container(
+          width: 44,
+          height: 44,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            border: Border.all(color: Colors.white.withOpacity(0.4), width: 1),
           ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  u.nickname,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
+          child: ClipOval(
+            child: u.avatar.isEmpty
+                ? Icon(Icons.person, color: Colors.white.withOpacity(0.7))
+                : CachedNetworkImage(
+                    imageUrl: u.avatar,
+                    fit: BoxFit.cover,
+                    placeholder: (_, __) =>
+                        Icon(Icons.person, color: Colors.white.withOpacity(0.7)),
+                    errorWidget: (_, __, ___) => Icon(Icons.person,
+                        color: Colors.white.withOpacity(0.7)),
                   ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  '已登录网易云音乐',
-                  style: TextStyle(
-                      color: Colors.white.withOpacity(0.5), fontSize: 11),
-                ),
-              ],
-            ),
           ),
-          GestureDetector(
-            onTap: () async {
-              await auth.logout();
-              // 清空云端收藏集合
-              context.read<PlayerState>().clearCloudFavorites();
-            },
-            child: Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-              decoration: BoxDecoration(
-                color: const Color(0xFFE05A8A).withOpacity(0.18),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(
-                    color: const Color(0xFFE05A8A).withOpacity(0.4)),
-              ),
-              child: const Text(
-                '退出登录',
-                style: TextStyle(
-                  color: Color(0xFFE05A8A),
-                  fontSize: 12,
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                u.nickname,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 15,
                   fontWeight: FontWeight.w700,
                 ),
               ),
+              const SizedBox(height: 2),
+              Text(
+                '已登录网易云音乐',
+                style:
+                    TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 11),
+              ),
+            ],
+          ),
+        ),
+        GestureDetector(
+          onTap: () async {
+            await auth.logout();
+            // 清空云端收藏集合
+            context.read<PlayerState>().clearCloudFavorites();
+          },
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+            decoration: BoxDecoration(
+              color: const Color(0xFFE05A8A).withOpacity(0.18),
+              borderRadius: BorderRadius.circular(12),
+              border:
+                  Border.all(color: const Color(0xFFE05A8A).withOpacity(0.4)),
+            ),
+            child: const Text(
+              '退出登录',
+              style: TextStyle(
+                color: Color(0xFFE05A8A),
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+              ),
             ),
           ),
-        ],
-      );
-    }
-    // 未登录
+        ),
+      ],
+    );
+  }
+
+  /// 网易云未登录：扫码登录入口
+  Widget _buildNeteaseLoginEntry() {
     return GestureDetector(
       onTap: () async {
         // 不先关闭设置弹窗，直接在上面叠加登录弹窗
         // 避免 Navigator.pop 后 context 分离导致 showDialog 失败
         final result = await showDialog<bool>(
           context: context,
-          builder: (_) => const LoginDialog(),
+          builder: (_) => const LoginDialog(source: 'netease'),
         );
         // 登录成功后关闭设置弹窗
         if (result == true && mounted) {
@@ -430,6 +475,333 @@ class _SettingsDialogState extends State<_SettingsDialog> {
             const Expanded(
               child: Text(
                 '扫码登录网易云音乐',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            Icon(Icons.arrow_forward_ios,
+                color: Colors.white.withOpacity(0.5), size: 14),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 酷狗已登录：图标 + 用户ID + 退出（酷狗接口无昵称/头像，展示用户ID）
+  Widget _buildKugouRow(AuthState auth) {
+    final uid = auth.kugouUserId;
+    final name = uid.isEmpty ? '酷狗音乐' : '酷狗用户 $uid';
+    return Row(
+      children: [
+        Container(
+          width: 44,
+          height: 44,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            border: Border.all(color: Colors.white.withOpacity(0.4), width: 1),
+          ),
+          child: ClipOval(
+            child: Icon(Icons.graphic_eq,
+                color: Colors.white.withOpacity(0.85), size: 22),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 2),
+              const Text(
+                '已登录酷狗音乐',
+                style: TextStyle(color: Colors.white54, fontSize: 11),
+              ),
+            ],
+          ),
+        ),
+        GestureDetector(
+          onTap: () => auth.kugouLogout(),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+            decoration: BoxDecoration(
+              color: const Color(0xFFE05A8A).withOpacity(0.18),
+              borderRadius: BorderRadius.circular(12),
+              border:
+                  Border.all(color: const Color(0xFFE05A8A).withOpacity(0.4)),
+            ),
+            child: const Text(
+              '退出登录',
+              style: TextStyle(
+                color: Color(0xFFE05A8A),
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// 酷狗未登录：扫码登录入口
+  Widget _buildKugouLoginEntry() {
+    return GestureDetector(
+      onTap: () async {
+        final result = await showDialog<bool>(
+          context: context,
+          builder: (_) => const LoginDialog(source: 'kugou'),
+        );
+        if (result == true && mounted) {
+          Navigator.pop(context);
+        }
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: const Color(0xFF4FA0E0).withOpacity(0.16),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: Colors.white.withOpacity(0.25)),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.qr_code_2, color: Colors.white.withOpacity(0.9), size: 22),
+            const SizedBox(width: 10),
+            const Expanded(
+              child: Text(
+                '扫码登录酷狗音乐',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            Icon(Icons.arrow_forward_ios,
+                color: Colors.white.withOpacity(0.5), size: 14),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// QQ 已登录：图标 + 用户ID + 退出（QQ 接口未返回昵称/头像，展示用户ID）
+  Widget _buildQQRow(AuthState auth) {
+    final uid = auth.qqUserId;
+    final name = uid.isEmpty ? 'QQ音乐' : 'QQ用户 $uid';
+    return Row(
+      children: [
+        Container(
+          width: 44,
+          height: 44,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            border: Border.all(color: Colors.white.withOpacity(0.4), width: 1),
+          ),
+          child: ClipOval(
+            child: Icon(Icons.music_note,
+                color: Colors.white.withOpacity(0.85), size: 22),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 2),
+              const Text(
+                '已登录QQ音乐',
+                style: TextStyle(color: Colors.white54, fontSize: 11),
+              ),
+            ],
+          ),
+        ),
+        GestureDetector(
+          onTap: () => auth.qqLogout(),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+            decoration: BoxDecoration(
+              color: const Color(0xFFE05A8A).withOpacity(0.18),
+              borderRadius: BorderRadius.circular(12),
+              border:
+                  Border.all(color: const Color(0xFFE05A8A).withOpacity(0.4)),
+            ),
+            child: const Text(
+              '退出登录',
+              style: TextStyle(
+                color: Color(0xFFE05A8A),
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// QQ 未登录：扫码登录入口
+  Widget _buildQQLoginEntry() {
+    return GestureDetector(
+      onTap: () async {
+        final result = await showDialog<bool>(
+          context: context,
+          builder: (_) => const LoginDialog(source: 'qq'),
+        );
+        if (result == true && mounted) {
+          Navigator.pop(context);
+        }
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: const Color(0xFF12B7F5).withOpacity(0.16),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: Colors.white.withOpacity(0.25)),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.qr_code_2, color: Colors.white.withOpacity(0.9), size: 22),
+            const SizedBox(width: 10),
+            const Expanded(
+              child: Text(
+                '扫码登录QQ音乐',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            Icon(Icons.arrow_forward_ios,
+                color: Colors.white.withOpacity(0.5), size: 14),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 汽水已登录：头像 + 昵称 + 退出（昵称/头像来自 /soda/status 的 user）
+  Widget _buildSodaRow(AuthState auth) {
+    final u = auth.sodaUser;
+    final name = (u != null && u.nickname.isNotEmpty) ? u.nickname : '汽水音乐';
+    return Row(
+      children: [
+        Container(
+          width: 44,
+          height: 44,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            border: Border.all(color: Colors.white.withOpacity(0.4), width: 1),
+          ),
+          child: ClipOval(
+            child: u != null && u.avatar.isNotEmpty
+                ? CachedNetworkImage(
+                    imageUrl: u.avatar,
+                    fit: BoxFit.cover,
+                    placeholder: (_, __) => Icon(Icons.person,
+                        color: Colors.white.withOpacity(0.7)),
+                    errorWidget: (_, __, ___) => Icon(Icons.water_drop_outlined,
+                        color: Colors.white.withOpacity(0.7)),
+                  )
+                : Icon(Icons.water_drop,
+                    color: Colors.white.withOpacity(0.85), size: 22),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 2),
+              const Text(
+                '已登录汽水音乐',
+                style: TextStyle(color: Colors.white54, fontSize: 11),
+              ),
+            ],
+          ),
+        ),
+        GestureDetector(
+          onTap: () => auth.sodaLogout(),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+            decoration: BoxDecoration(
+              color: const Color(0xFFE05A8A).withOpacity(0.18),
+              borderRadius: BorderRadius.circular(12),
+              border:
+                  Border.all(color: const Color(0xFFE05A8A).withOpacity(0.4)),
+            ),
+            child: const Text(
+              '退出登录',
+              style: TextStyle(
+                color: Color(0xFFE05A8A),
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// 汽水未登录：扫码登录入口
+  Widget _buildSodaLoginEntry() {
+    return GestureDetector(
+      onTap: () async {
+        final result = await showDialog<bool>(
+          context: context,
+          builder: (_) => const LoginDialog(source: 'soda'),
+        );
+        if (result == true && mounted) {
+          Navigator.pop(context);
+        }
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: const Color(0xFF46C9B6).withOpacity(0.16),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: Colors.white.withOpacity(0.25)),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.qr_code_2, color: Colors.white.withOpacity(0.9), size: 22),
+            const SizedBox(width: 10),
+            const Expanded(
+              child: Text(
+                '扫码登录汽水音乐',
                 style: TextStyle(
                   color: Colors.white,
                   fontSize: 14,

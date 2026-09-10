@@ -86,6 +86,7 @@ class PlayerState extends ChangeNotifier {
   // ---------- 歌词 ----------
   List<LyricLine> _lyrics = const [];
   List<LyricLine> _translation = const [];
+
   /// 与 [_lyrics] 对齐的翻译文本（无对应翻译为 null）
   List<String?> _translationsAligned = const [];
   List<LyricLine> get lyrics => _lyrics;
@@ -131,7 +132,10 @@ class PlayerState extends ChangeNotifier {
       if (state == ProcessingState.completed && !_autoAdvancing) {
         _autoAdvancing = true;
         next(auto: true);
-        Future.delayed(const Duration(seconds: 1), () => _autoAdvancing = false);
+        Future.delayed(
+          const Duration(seconds: 1),
+          () => _autoAdvancing = false,
+        );
       }
     });
     loadFavorites();
@@ -157,6 +161,14 @@ class PlayerState extends ChangeNotifier {
       _queue.add(song);
       _index = _queue.length - 1;
     }
+    await _startCurrent();
+  }
+
+  /// 一键播放：清空当前队列，把 [songs] 按顺序加入并从第一首开始播放
+  Future<void> playAll(List<Song> songs) async {
+    if (songs.isEmpty) return;
+    _queue = List.of(songs);
+    _index = 0;
     await _startCurrent();
   }
 
@@ -328,10 +340,71 @@ class PlayerState extends ChangeNotifier {
           // B站 CDN 需带 bilibili Referer 防盗链，走服务器代理
           playUrl = await ApiService.biliStreamUrl(song.bvid!);
           await _player.setUrl(playUrl);
+        } else if (song.isKugou) {
+          // 酷狗：/kugou/song/url?hash=（免费128k，地址 2-4 小时时效实时请求）
+          final info = await ApiService.kugouSongUrl(song.hash ?? '');
+          currentQuality = _qualityDesc(info.br, 'kugou', false);
+          try {
+            await _player.setUrl(info.url);
+            playUrl = info.url;
+          } catch (e) {
+            debugPrint('酷狗直连失败，回退服务器代理：$e');
+            playUrl = ApiService.proxyUrlOf(info.url);
+            await _player.setUrl(playUrl);
+          }
+          unawaited(_cacheSong(song, playUrl));
+        } else if (song.isQQ) {
+          // QQ：/qq/song/url?mid=&name=&artist=&duration=
+          // 必须带歌名/歌手/时长（后端靠它做 VIP 歌兜底匹配，返回实际音源）
+          final info = await ApiService.qqSongUrl(
+            mid: song.mid ?? '',
+            name: song.name,
+            artist: song.artists.isNotEmpty ? song.artists.join(' / ') : '',
+            duration: song.duration,
+          );
+          currentQuality = _qualityDesc(info.br, info.source, info.unblocked);
+          final qqUrl = info.url.startsWith('/')
+              // B站兜底可能返回相对路径（/stream/bili?bvid=xxx），补全服务器地址
+              ? '${AppConfig.apiBaseUrl.replaceAll(RegExp(r'/+$'), '')}${info.url}'
+              : info.url;
+          try {
+            await _player.setUrl(qqUrl);
+            playUrl = qqUrl;
+          } catch (e) {
+            debugPrint('QQ 直连失败，回退服务器代理：$e');
+            playUrl = ApiService.proxyUrlOf(qqUrl);
+            await _player.setUrl(playUrl);
+          }
+          unawaited(_cacheSong(song, playUrl));
+        } else if (song.isSoda) {
+          // 汽水：/soda/song/url?id=&name=&artist=&duration=
+          // 必须带歌名/歌手/时长（毫秒）——后端靠它做 VIP 歌换源匹配，返回实际音源
+          final info = await ApiService.sodaSongUrl(
+            id: song.id.toString(),
+            name: song.name,
+            artist: song.artists.isNotEmpty ? song.artists.join(' / ') : '',
+            duration: song.duration,
+          );
+          currentQuality = _qualityDesc(info.br, info.source, info.unblocked);
+          final sodaUrl = info.url.startsWith('/')
+              // 兜底可能返回相对路径（/stream/bili?bvid=xxx），补全服务器地址
+              ? '${AppConfig.apiBaseUrl.replaceAll(RegExp(r'/+$'), '')}${info.url}'
+              : info.url;
+          try {
+            await _player.setUrl(sodaUrl);
+            playUrl = sodaUrl;
+          } catch (e) {
+            debugPrint('汽水直连失败，回退服务器代理：$e');
+            playUrl = ApiService.proxyUrlOf(sodaUrl);
+            await _player.setUrl(playUrl);
+          }
+          unawaited(_cacheSong(song, playUrl));
         } else {
           // 网易云：优先直连真实 CDN（不占服务器带宽），失败回退服务器代理
-          final info = await ApiService.songStreamInfo(song.id,
-              br: AppConfig.audioBitrate);
+          final info = await ApiService.songStreamInfo(
+            song.id,
+            br: AppConfig.audioBitrate,
+          );
           currentQuality = _qualityDesc(info.br, info.source, info.unblocked);
           final real = info.url;
           try {
@@ -384,8 +457,8 @@ class PlayerState extends ChangeNotifier {
   }
 
   Future<void> _loadDetail(Song song) async {
-    // B站歌无网易云详情接口，跳过
-    if (song.isBilibili) return;
+    // B站/酷狗/QQ/汽水歌无网易云详情接口，跳过
+    if (song.isBilibili || song.isKugou || song.isQQ || song.isSoda) return;
     try {
       final details = await ApiService.songDetail([song.id]);
       if (details.isNotEmpty && details.first.cover.isNotEmpty) {
@@ -401,10 +474,19 @@ class PlayerState extends ChangeNotifier {
   }
 
   Future<void> _loadLyric(Song song) async {
-    // B站歌无网易云歌词接口，跳过
-    if (song.isBilibili) return;
     try {
-      final result = await ApiService.lyric(song.id);
+      // 汽水：优先官方歌词（/soda/lyric），失败回退歌名+歌手多源兜底；
+      // 网易云歌有数字 id 走原接口（保留翻译）；酷狗/QQ/B站歌按歌名+歌手走多源兜底。
+      final artist = song.artists.isNotEmpty ? song.artists.join(' / ') : '';
+      final result = song.isSoda
+          ? await _sodaLyricWithFallback(song, artist)
+          : (!song.isKugou && !song.isQQ && !song.isBilibili && song.id > 0)
+          ? await ApiService.lyric(song.id)
+          : await ApiService.lyricAny(
+              song.name,
+              artist,
+              duration: song.duration,
+            );
       _lyrics = result.main;
       _translation = result.translation;
       // 按时间对齐翻译（毫秒级容差）
@@ -415,13 +497,27 @@ class PlayerState extends ChangeNotifier {
       _translationsAligned = [
         for (final l in _lyrics)
           tMap[l.time.inMilliseconds] ??
-              _findNearTranslation(l.time.inMilliseconds)
+              _findNearTranslation(l.time.inMilliseconds),
       ];
       notifyListeners();
       // 歌词加载完成后刷新自定义通知（从"暂无歌词"切到当前行）
       MediaNotificationBridge.push(force: true);
     } catch (_) {
       // 歌词加载失败静默处理
+    }
+  }
+
+  /// 汽水歌词：优先官方 /soda/lyric，失败回退歌名+歌手多源兜底
+  Future<({List<LyricLine> main, List<LyricLine> translation})>
+  _sodaLyricWithFallback(Song song, String artist) async {
+    try {
+      return await ApiService.sodaLyric(song.id.toString());
+    } catch (_) {
+      return await ApiService.lyricAny(
+        song.name,
+        artist,
+        duration: song.duration,
+      );
     }
   }
 
@@ -435,13 +531,28 @@ class PlayerState extends ChangeNotifier {
   // ---------- 收藏（本地收藏与网易云喜欢完全分离） ----------
   Set<int> _localFavoriteIds = {}; // 本地收藏（DbService.favorites 表）
   Set<int> _cloudFavoriteIds = {}; // 网易云"我喜欢的音乐"
+  Set<int> _qqLikedSongIds = {}; // QQ 音乐「我喜欢」（songId 集合）
 
   /// 全局爱心集合（本地或云端任一）：仅供红心展示
   Set<int> get favoriteIds => _localFavoriteIds.union(_cloudFavoriteIds);
 
+  /// QQ 已收藏 songId 集合（QQ 歌曲红心依据）
+  Set<int> get qqLikedSongIds => _qqLikedSongIds;
+
   /// 全局爱心：本地或云端任一存在即红心（播放页/搜索页/普通歌单）
-  bool isFavorite(Song song) =>
-      _localFavoriteIds.contains(song.id) || _cloudFavoriteIds.contains(song.id);
+  bool isFavorite(Song song) {
+    // QQ 歌：本地收藏 ∪ QQ「我喜欢」；不参与网易云集合
+    if (song.isQQ) {
+      return _localFavoriteIds.contains(song.id) ||
+          _qqLikedSongIds.contains(song.songId);
+    }
+    return _localFavoriteIds.contains(song.id) ||
+        _cloudFavoriteIds.contains(song.id);
+  }
+
+  /// 仅 QQ 云端喜欢（QQ「我喜欢」歌单专用）
+  bool isQqFavorite(Song song) =>
+      song.isQQ && _qqLikedSongIds.contains(song.songId);
 
   /// 仅本地收藏（「我的收藏」tab 专用）
   bool isLocalFavorite(Song song) => _localFavoriteIds.contains(song.id);
@@ -509,6 +620,25 @@ class PlayerState extends ChangeNotifier {
     }
   }
 
+  /// 从 QQ 拉取「我喜欢」songId 集合（QQ 登录后调用）
+  Future<void> loadQqFavorites() async {
+    try {
+      final ids = await ApiService.qqLikedIds();
+      _qqLikedSongIds = ids;
+      notifyListeners();
+      MediaNotificationBridge.push(force: true);
+    } catch (_) {
+      // 未登录 / 网络失败：静默
+    }
+  }
+
+  /// 清空 QQ 收藏集合（QQ 退出登录时调用）
+  void clearQqFavorites() {
+    _qqLikedSongIds = {};
+    notifyListeners();
+    MediaNotificationBridge.push(force: true);
+  }
+
   /// 清空云端收藏集合（退出登录时调用）
   void clearCloudFavorites() {
     _cloudFavoriteIds = {};
@@ -543,8 +673,29 @@ class PlayerState extends ChangeNotifier {
     notifyListeners();
     MediaNotificationBridge.push(force: true);
 
-    // B站歌只做本地收藏；未登录也仅本地（不同步网易云）
-    if (song.isBilibili || !loggedIn) {
+    // QQ 歌：本地 + QQ「我喜欢」双写（不碰网易云）
+    if (song.isQQ) {
+      // 没有数字 songId 的 QQ 歌（异常数据）只做本地
+      if (song.songId <= 0) return 'local';
+      try {
+        await ApiService.qqLikeSong(song.songId, newLike);
+        // 以服务端真实结果为准
+        if (newLike) {
+          _qqLikedSongIds.add(song.songId);
+        } else {
+          _qqLikedSongIds.remove(song.songId);
+        }
+        notifyListeners();
+        MediaNotificationBridge.push(force: true);
+        return 'ok';
+      } catch (_) {
+        // QQ 未登录 / 网络失败：仅本地已生效
+        return 'local';
+      }
+    }
+
+    // B站/酷狗歌只做本地收藏；未登录也仅本地（不同步网易云）
+    if (song.isBilibili || song.isKugou || !loggedIn) {
       return 'local';
     }
 

@@ -7,8 +7,42 @@ cookie.txt
 .npmrc
 *.log
 
+# 登录日志模块（本地专用，不上传 GitHub）
+admin-logger.js
+.admin-config.json
+login-log.json
+*-log.json
+
 # 系统/编辑器
 .DS_Store
 Thumbs.db
 .vscode/
 .idea/
+
+# 各音源登录态（cookie）—— 绝不能上传
+soda-cookie.txt
+kugou-cookie.json
+qq-login-cookie.txt
+qishui-cookie.json
+
+# 逆向/调试目录（含抓包 pcap、APK、登录态、临时脚本）；只保留一键登录依赖脚本
+qr-decode/*
+!qr-decode/read-pc-cookie.py
+
+# 调试脚本与产物
+test-*.js
+*.bak
+*.bak2
+qr-last.json
+qr-last.key
+qr-last.png
+qq-login-qr.png
+qq-qr-meta.json
+qq-ui-issue.png
+qr-issue.png
+server-qr.png
+server-qr2.png
+server-boot.log
+
+# 逆向调试产物目录（抓包/证书/反编译APK/工作日志）—— 绝不上传
+docs/

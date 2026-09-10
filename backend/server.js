@@ -6,6 +6,9 @@
  *
  * 启动：node server.js   （默认端口 41831，可用环境变量 PORT 修改）
  */
+// 酷狗 everydayrec/persnfm 等 CDN 域名的证书 SAN 与域名不匹配（ERR_TLS_CERT_ALTNAME_INVALID），
+// Node fetch 默认校验证书会报 fetch failed；音源服务只访问音乐平台官方 API，统一关闭 TLS 证书校验。
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'
 const http = require('http')
 const { URL } = require('url')
 const fs = require('fs')
@@ -13,6 +16,16 @@ const path = require('path')
 const { AsyncLocalStorage } = require('async_hooks')
 
 const NCM = require('@neteasecloudmusicapienhanced/api')
+const kugou = require('./kugou-api')
+const qq = require('./qq-api')
+// 汽水音乐模块（第4音源）：可选加载——本地上传了 soda-api.js 才启用，
+// 公开仓库暂缓汽水登录，soda-api.js 不上传时后端依旧可正常启动。
+let soda = null
+try {
+  soda = require('./soda-api')
+} catch (e) {
+  console.warn('[soda] soda-api.js 未安装，汽水音乐路由暂缓（/soda/* 返回 404）')
+}
 
 // ---- 音源解锁（对应 VutronMusic 的 unblockNeteaseMusic 功能）----
 // 网易云部分歌曲受限/无版权/仅试听时，从其他平台匹配同一首歌的可用源
@@ -27,14 +40,26 @@ const unblockMatch = (() => {
   }
 })()
 // 解锁来源列表（已移除酷我 kuwo 及走酷我 CDN 的 bodian——该源不稳定）
-const UNBLOCK_SOURCES = ['kugou', 'ytdlp', 'qq', 'bilibili', 'pyncmd', 'migu']
+const UNBLOCK_SOURCES = ['kugou', 'ytdlp', 'qq', 'bilibili', 'migu', 'pyncmd']
 
 /** 从其他平台为受限歌曲匹配可用播放源；失败返回 null */
-async function unblockSong(id) {
+/** 从其他平台为受限歌曲匹配可用播放源；失败返回 null。sources 可传自定义顺序（酷狗链路用 qq→migu→ytdlp，B站最后兜底） */
+async function unblockSong(id, sources = UNBLOCK_SOURCES, songInfo = null) {
   if (!unblockMatch) return null
   try {
-    const res = await unblockMatch(Number(id), UNBLOCK_SOURCES)
-    return (res && res.url) ? res : null
+    const res = songInfo
+      ? await unblockMatch(Number(id), sources, songInfo)
+      : await unblockMatch(Number(id), sources)
+    if (res && res.url) {
+      // pyncmd 是第三方网盘云 API（GD studio），曾出现串歌（不同歌返回同一资源）。
+      // 只信它返回网易云官方 CDN（music.126.net）的资源，网盘/FLAC 一律拒绝。
+      if (res.source === 'pyncmd' && !/music\.126\.net/.test(res.url)) {
+        console.warn('[unblock] pyncmd 返回非网易云CDN资源，拒绝', id, String(res.url).slice(0, 70))
+        return null
+      }
+      return res
+    }
+    return null
   } catch (e) {
     console.error('[unblock] 匹配失败', id, e && e.message)
     return null
@@ -104,6 +129,180 @@ function parseBiliDuration(d) {
 }
 
 /** B站视频搜索 → 统一歌曲格式（id 用 bvid 字符串） */
+/** 网易云搜索候选：歌名完全相等+歌手命中 优先，其次 歌名互含+歌手命中，最后 仅歌手命中；过滤短时长/翻唱/钢琴等非原版。返回最多 3 个候选依次尝试 */
+function artistHit(artist, arList) {
+  const t = String(artist || '').trim().toLowerCase()
+  if (!t) return false
+  return (arList || []).some((a) => {
+    const an = String(a.name || '').trim().toLowerCase()
+    return an === t || an.includes(t) || t.includes(an)
+  })
+}
+function neteaseCandidates(songs, name, artist) {
+  const BAD = /钢琴|翻唱|cover|Live|现场|伴奏|remix|AI|纯音乐|演奏|吉他|尤克里里|合唱|童声|片段|串烧|架子鼓|萨克斯|女声版|男声版|深情|DJ|Beat|Trap|说唱|小提琴|笛子|二胡|古筝|口琴/i
+  const clean = (s) => String(s || '').replace(/\s+/g, '').toLowerCase()
+  const tn = clean(name)
+  const list = (songs || []).filter((s) => {
+    const d = Number(s.dt || 0)
+    if (d > 0 && d < 60000) return false
+    if (BAD.test(String(s.name || ''))) return false
+    return true
+  })
+  const nameHit = list.filter((s) => {
+    const sn = clean(s.name)
+    return sn === tn || sn.includes(tn) || tn.includes(sn)
+  })
+  const withArtist = nameHit.filter((s) => artistHit(artist, s.ar))
+  // direct：歌名强匹配 + 歌手命中 + 正版 id（<20亿，网易云官方发行；≥20亿是用户上传 UGC，内容不可信，不直取）
+  const direct = withArtist.filter((s) => Number(s.id) < 2000000000)
+  // unblock：优先歌手命中，其次仅歌名命中（unblock 拿歌名去 QQ/咪咕 搜，不限网易云侧歌手）
+  // unblock 候选强制歌名+歌手双命中（unblock 在 QQ/咪咕 侧匹配同歌正版，不匹配翻唱）
+  const unblockList = withArtist.slice(0, 3)
+  return { direct: direct.slice(0, 3), unblock: unblockList }
+}
+
+/** B站结果强匹配：歌名含目标歌名，且歌手字段或视频标题含目标歌手 */
+
+/** 通用换源：按 歌名+歌手+时长 在网易云强匹配 → 免费直链 → 解锁源 → B站兜底。
+ *  与 QQ 音乐链路完全一致（分层匹配 + 解锁 + B站强匹配）。返回统一结构或 null。 */
+async function fallbackSong(name, artist, duration, fromLabel, host) {
+  if (!name) return null
+  const stripPunct = (s) => String(s || '').replace(/[\s!！?？.。·、,，\-—:：'"“”‘’()（）[\]【】×*＊/+]/g, '').toLowerCase()
+  const pick = (songs, durRef) => {
+    const tn = String(name || '').replace(/\s+/g, '').toLowerCase()
+    const tokens = String(artist || '').split(/[/、,&，;；\s]+/).filter(Boolean).map((t) => t.toLowerCase())
+    const dur = Number(durRef) || 0
+    const durOk = (s) => dur <= 0 || s.duration <= 0 || Math.abs(dur - s.duration) / dur <= 0.25
+    const artistHitOf = (s) => {
+      const sa = String(s.artist || '').toLowerCase()
+      return tokens.length === 0 || tokens.some((t) => sa.includes(t))
+    }
+    const tiers = [[], [], [], []]
+    for (let i = 0; i < songs.length; i++) {
+      const s = songs[i]
+      const sn = String(s.name || '').replace(/\s+/g, '').toLowerCase()
+      if (!sn || !tn || !(sn.includes(tn) || tn.includes(sn))) continue
+      const nameEq = stripPunct(s.name) === stripPunct(name)
+      if (nameEq && durOk(s)) tiers[0].push({ s, i })
+      else if (artistHitOf(s) && durOk(s)) tiers[1].push({ s, i })
+      else if (durOk(s)) tiers[2].push({ s, i })
+      else tiers[3].push({ s, i })
+    }
+    for (const tier of tiers) {
+      if (!tier.length) continue
+      const hit = tier.find((x) => artistHitOf(x.s))
+      return (hit || tier[0]).s
+    }
+    return null
+  }
+  try {
+    const searchKw = [name, artist].filter(Boolean).join(' ')
+    let body = await call('cloudsearch', { keywords: searchKw, limit: 10, type: 1 })
+    let songs = ((body.result && body.result.songs) || []).map((s) => ({
+      id: s.id, name: s.name, artist: (s.ar || []).map((a) => a.name).join(' / '), duration: s.dt || 0,
+    }))
+    let hit = pick(songs, Number(duration || 0))
+    if (!hit && artist) {
+      body = await call('cloudsearch', { keywords: name, limit: 10, type: 1 })
+      songs = ((body.result && body.result.songs) || []).map((s) => ({
+        id: s.id, name: s.name, artist: (s.ar || []).map((a) => a.name).join(' / '), duration: s.dt || 0,
+      }))
+      hit = pick(songs, Number(duration || 0))
+    }
+    if (hit) {
+      try {
+        const freeBody = await call('song_url', { id: hit.id, br: 320000 })
+        const freeData = (freeBody.data || [])[0] || {}
+        if (freeData.url && freeData.freeTrialInfo === null) {
+          return { url: freeData.url, br: 320000, type: 'mp3', source: 'netease', unblocked: false, fallbackFrom: fromLabel, matched: { name: hit.name, artist: hit.artist } }
+        }
+      } catch (e) { console.error('[' + fromLabel + '] 网易云官方直链失败', e && e.message) }
+      const un = await unblockSong(hit.id, UNBLOCK_SOURCES)
+      if (un && un.url) {
+        return { url: un.url, br: un.br || null, type: 'mp3', source: un.source || 'unblock', unblocked: true, fallbackFrom: fromLabel, matched: { name: hit.name, artist: hit.artist } }
+      }
+    }
+  } catch (e) { console.error('[' + fromLabel + '] 解锁兜底失败', e && e.message) }
+  try {
+    const bs = await biliSearch([name, artist].filter(Boolean).join(' '))
+    const hit = strongPickBili(bs, name, artist, Number(duration || 0) ? [Number(duration)] : [])
+    if (hit) {
+      const h = host || ('127.0.0.1:' + PORT)
+      return { url: 'http://' + h + '/stream/bili?bvid=' + encodeURIComponent(hit.bvid), type: 'mp3', source: 'bilibili', unblocked: true, fallbackFrom: fromLabel, matched: { name: hit.name, artist: hit.artist || '' } }
+    }
+  } catch (e) { console.error('[' + fromLabel + '] B站兜底失败', e && e.message) }
+  return null
+}
+
+function strongPickBili(songs, name, artist, refDurations = []) {
+  const clean = (s) => String(s || '').replace(/\s+/g, '').toLowerCase()
+  const tn = clean(name)
+  const ta = clean(artist)
+  // 非音乐版本黑名单（B站常见鼓谱/伴奏/教学/Live/remix 等错版）
+  const BAD = /(伴奏|鼓谱|琴谱|乐谱|歌谱|教学|教程|钢琴|remix|bootleg|live|现场|翻唱|cover|演奏|无人声|纯伴奏|和声|乐评|素材|转场|1\.1x|1\.2x|指弹|串烧|模仿|动态|教学视频|讲解|开箱|鬼畜)/
+  // 质量优先级：Q1 无损音质/视听版本（用户点名最高）→ Q2 官方/原版/MV/完整/4K
+  const Q1 = /(无损|hi-res|hires|视听)/
+  const Q2 = /(官方|原版|mv|完整|4k)/
+  // 参考正版时长（毫秒→秒）：来自 QQ 音乐正版或酷狗音乐正版
+  const refs = (refDurations || []).map(Number).filter((d) => d > 0).map((d) => d / 1000)
+  const hit = (s) => {
+    const sn = clean(s.name)
+    const sa = clean(s.artist || '')
+    if (BAD.test(sn)) return false
+    if (tn && !(sn.includes(tn) || tn.includes(sn))) return false
+    if (ta && !(sa.includes(ta) || sn.includes(ta))) return false
+    return true
+  }
+  const matched = (songs || []).filter(hit)
+  if (!matched.length) return null
+  const dur = (s) => Number(s.duration || 0)
+  if (refs.length) {
+    // 时长与任一正版参考相差 <= 25s 才采信（排除 Live/剪辑/翻唱等错版）
+    const within = matched.filter((s) => {
+      const d = dur(s)
+      if (!d) return false
+      return refs.some((r) => Math.abs(d - r) <= 35)
+    })
+    if (within.length) {
+      // 时长相近前提下：无损音质/视听 优先 → 官方/原版/MV → 普通；同层按时长最接近
+      const qrank = (n) => (Q1.test(n) ? 0 : Q2.test(n) ? 1 : 2)
+      return within.sort((a, b) => {
+        const ra = qrank(clean(a.name))
+        const rb = qrank(clean(b.name))
+        if (ra !== rb) return ra - rb
+        const da = Math.min(...refs.map((r) => Math.abs(dur(a) - r)))
+        const db = Math.min(...refs.map((r) => Math.abs(dur(b) - r)))
+        return da - db
+      })[0]
+    }
+    // 歌名/歌手命中但时长差太远（Live/剪辑/翻唱）→ 宁缺毋滥
+    return null
+  }
+  // 无参考时长：黑名单过滤后取第一条
+  return matched[0]
+}
+
+/** 用 QQ 音乐正版时长作 B站兜底的参考时长（毫秒数组，取前3候选；失败返回空） */
+async function qqSearchDurations(name, artist) {
+  try {
+    const query = [name, artist].filter(Boolean).join(' ').trim()
+    if (!query) return []
+    const url = 'https://u.y.qq.com/cgi-bin/musicu.fcg?data=' + encodeURIComponent(JSON.stringify({
+      search: {
+        method: 'DoSearchForQQMusicDesktop',
+        module: 'music.search.SearchCgiService',
+        param: { num_per_page: 3, page_num: 1, query, search_type: 0 },
+      },
+    }))
+    const { stdout } = await execFileAsync(CURL, ['-s', '--compressed', '-A', 'Mozilla/5.0', '-H', 'Referer: http://y.qq.com/', url], { maxBuffer: 5 * 1024 * 1024, timeout: 20000 })
+    const j = JSON.parse(stdout)
+    const list = (j.search && j.search.data && j.search.data.body && j.search.data.body.song && j.search.data.body.song.list) || []
+    return list.map((x) => (x && x.interval ? Number(x.interval) * 1000 : 0)).filter((d) => d > 0)
+  } catch (e) {
+    return []
+  }
+}
+
 async function biliSearch(keywords, limit = 20) {
   const url = 'https://api.bilibili.com/x/web-interface/search/type?search_type=video&keyword=' + encodeURIComponent(keywords)
   const body = await biliCurlJson(url, { referer: 'https://search.bilibili.com/' })
@@ -421,6 +620,34 @@ const routes = {
           },
         }
       }
+      // unblock 失败 → B站强匹配兜底（网易云 VIP/无版权歌也能听完整版）
+      try {
+        const det = await call('song_detail', { ids: String(id) })
+        const song = (det.songs || [])[0]
+        if (song && song.name) {
+          const artistStr = (song.ar || []).map((a) => a.name).join(' ')
+          const bs = await biliSearch((song.name + ' ' + artistStr).trim())
+          const hit = strongPickBili(bs, song.name, artistStr, song.duration ? [Number(song.duration)] : [])
+          if (hit) {
+            const host = (p && p.headers && p.headers.host) || ('127.0.0.1:' + PORT)
+            return {
+              code: 200,
+              data: {
+                id: Number(id),
+                url: 'http://' + host + '/stream/bili?bvid=' + encodeURIComponent(hit.bvid),
+                type: 'mp3',
+                source: 'bilibili',
+                unblocked: true,
+                fallbackFrom: 'netease',
+              },
+            }
+          }
+        }
+      } catch (e) {
+        console.error('[song/url] B站兜底失败', e && e.message)
+      }
+      // 仍是试听：标记 trial，前端可提示或自动跳下一首
+      return { code: 200, data: { id: data.id || Number(id), url: data.url || '', br: data.br || null, size: data.size || null, trial: true } }
     }
     return { code: 200, data: { id: data.id, url: data.url, br: data.br, size: data.size } }
   },
@@ -467,6 +694,78 @@ const routes = {
     }
   },
 
+  // 歌词多源兜底：按 歌名+歌手（+时长）强匹配，网易云 → 酷狗 依次取
+  // 返回 {code, lrc, tlyric, source}；找不到时 lrc 为空串，前端显示"暂无歌词"
+  'lyric/any': async (q, p) => {
+    const name = (q.get('name') || '').trim()
+    const artist = (q.get('artist') || '').trim()
+    if (!name) throw Object.assign(new Error('缺少参数 name'), { status: 400 })
+    const duration = Number(q.get('duration') || 0)
+
+    // 强匹配打分：歌名互含 + 歌手 token 命中 → 返回时长差（越小越优）；不匹配返回 -1
+    const pick = (songs) => {
+      let best = null
+      let bestDiff = Infinity
+      for (const s of songs) {
+        const sn = String(s.name || '').replace(/\s+/g, '').toLowerCase()
+        const tn = String(name || '').replace(/\s+/g, '').toLowerCase()
+        if (!sn || !tn || !(sn.includes(tn) || tn.includes(sn))) continue
+        const tokens = String(artist || '').split(/[/、,&，;；\s]+/).filter(Boolean).map((t) => t.toLowerCase())
+        const sa = String(s.artist || '').toLowerCase()
+        if (tokens.length && !tokens.some((t) => sa.includes(t))) continue
+        const diff = duration > 0 && s.duration > 0 ? Math.abs(duration - s.duration) : 0
+        if (diff < bestDiff) { best = s; bestDiff = diff }
+      }
+      return best
+    }
+
+    // 1) 网易云：搜索 → 强匹配 → 原文 + 翻译
+    try {
+      const body = await call('cloudsearch', {
+        keywords: [name, artist].filter(Boolean).join(' '), limit: 10, type: 1,
+      })
+      const songs = ((body.result && body.result.songs) || []).map((s) => ({
+        id: s.id,
+        name: s.name,
+        artist: (s.ar || []).map((a) => a.name).join(' / '),
+        duration: s.dt || 0,
+      }))
+      const hit = pick(songs)
+      if (hit) {
+        const ly = await call('lyric', { id: hit.id })
+        if (ly.lrc && ly.lrc.lyric) {
+          return {
+            code: 200,
+            lrc: ly.lrc.lyric,
+            tlyric: ly.tlyric ? ly.tlyric.lyric : '',
+            source: 'netease',
+            matched: { name: hit.name, artist: hit.artist },
+          }
+        }
+      }
+    } catch (_) { /* 网易云失败继续酷狗 */ }
+
+    // 2) 酷狗：搜索 → 强匹配 → 歌词服务器
+    try {
+      const bs = await kugou.search([name, artist].filter(Boolean).join(' '), 1, 10)
+      const hit = pick((bs.songs || []))
+      if (hit && hit.hash) {
+        const ly = await kugou.lyric(hit.hash)
+        if (ly && ly.lrc) {
+          return {
+            code: 200,
+            lrc: ly.lrc,
+            tlyric: ly.tlyric || '',
+            source: 'kugou',
+            matched: { name: hit.name, artist: hit.artist },
+          }
+        }
+      }
+    } catch (_) { /* 酷狗失败返回空 */ }
+
+    return { code: 200, lrc: '', tlyric: '', source: '', matched: null }
+  },
+
   // 歌曲详情（ids 逗号分隔；返回封面、名称、歌手、专辑）
   'song/detail': async (q, p) => {
     const ids = (q.get('ids') || '').split(',').map(Number).filter(Boolean)
@@ -510,6 +809,65 @@ const routes = {
     }
   },
 
+  // 私人雷达歌单（需登录）：三重兜底识别（按优先级）
+  // ① 固定歌单 ID 3136952023（网易云官方私人雷达，VutronMusic 等项目通用）
+  // ② /recommend/resource 推荐列表中名称包含"雷达"的歌单
+  // ③ 推荐列表第一个
+  async radar(q, p) {
+    const RADAR_PLAYLIST_ID = '3136952023'
+    const st = await call('login_status')
+    const account = st.data && st.data.account
+    if (!account) {
+      return { code: 200, loggedIn: false, playlistId: null, playlistName: '', songs: [] }
+    }
+
+    const mapTracks = (tracks) => (tracks || []).map((s) => ({
+      id: s.id,
+      name: s.name,
+      artists: (s.ar || []).map((a) => a.name),
+      album: s.al ? s.al.name : '',
+      cover: resizePic(s.al ? s.al.picUrl : '', 300),
+      duration: s.dt,
+    }))
+
+    const fromDetail = async (id, fallbackName) => {
+      const body = await call('playlist_detail', { id: Number(id) })
+      const pl = body.playlist || {}
+      if (!(pl.tracks || []).length) return null
+      return {
+        code: 200,
+        loggedIn: true,
+        playlistId: String(pl.id || id),
+        playlistName: pl.name || fallbackName || '私人雷达',
+        songs: mapTracks(pl.tracks),
+      }
+    }
+
+    // ① 固定歌单 ID 直接获取（最准确）
+    try {
+      const r = await fromDetail(RADAR_PLAYLIST_ID, '私人雷达')
+      if (r) return r
+      console.error('[radar] 固定 ID 无曲目，走兜底')
+    } catch (e) {
+      console.error('[radar] 固定 ID 获取失败，走兜底:', e && e.message)
+    }
+
+    // ②③ 每日推荐歌单列表：名称含"雷达"优先，否则取第一个
+    try {
+      const rec = await call('recommend_resource')
+      const list = (rec && rec.recommend) || []
+      const radar = list.find((pl) => pl.name && pl.name.includes('雷达')) || list[0]
+      if (radar && radar.id) {
+        const r = await fromDetail(radar.id, radar.name)
+        if (r) return r
+      }
+    } catch (e) {
+      console.error('[radar] recommend_resource 兜底失败:', e && e.message)
+    }
+
+    return { code: 404, loggedIn: true, playlistId: null, playlistName: '', songs: [], message: '获取雷达歌单失败' }
+  },
+
   // 创建二维码登录（返回 unikey + 二维码 base64 + 扫码链接）
   'login/qr': async (q, p) => {
     const keyBody = await call('login_qr_key')
@@ -524,10 +882,24 @@ const routes = {
   },
 
   // 轮询二维码登录状态：code 800=过期 801=待扫码 802=已扫码待确认 803=登录成功(已保存 cookie)
-  'login/qr/check': async (q, p) => {
+  'login/qr/check': async (q, req) => {
     const key = q.get('key')
     if (!key) throw Object.assign(new Error('缺少参数 key'), { status: 400 })
     const body = await call('login_qr_check', { key })
+    // 登录成功（code=803）时记录日志（本地专用模块，开源版本无此功能）
+    if (body.code === 803 && adminLogger) {
+      try {
+        const st = await call('login_status')
+        const profile = st.data && st.data.profile
+        const rawIp = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').toString()
+        adminLogger.recordLogin({
+          userId: profile ? profile.userId : '',
+          nickname: profile ? profile.nickname : '未知',
+          ip: rawIp.split(',')[0].trim(),
+          userAgent: req.headers['user-agent'] || '',
+        })
+      } catch (e) { /* 记录日志失败不影响登录响应 */ }
+    }
     return { code: body.code, message: body.message }
   },
 
@@ -630,16 +1002,449 @@ const routes = {
       limit: Number(q.get('limit') || 50),
       offset: Number(q.get('offset') || 0),
     })
-    const playlists = (body.playlist || []).map((p) => ({
-      id: p.id,
-      name: p.name,
-      cover: resizePic(p.coverImgUrl, 300),
-      trackCount: p.trackCount,
-      playCount: p.playCount,
-      creator: p.creator ? p.creator.nickname : '',
+    // 封面字段多重兜底：coverImgUrl / picUrl / coverUrl / imgUrl
+    const pickCover = (obj) => obj.coverImgUrl || obj.picUrl || obj.coverUrl || obj.imgUrl || ''
+    let playlists = (body.playlist || []).map((pl) => ({
+      id: pl.id,
+      name: pl.name,
+      cover: pickCover(pl) ? resizePic(pickCover(pl), 300) : '',
+      trackCount: pl.trackCount,
+      playCount: pl.playCount,
+      creator: pl.creator ? pl.creator.nickname : '',
     }))
+    // 对封面为空的歌单，调 /playlist/detail 补封面（批量并发，最多补 10 个避免太慢）
+    const emptyList = playlists.filter((pl) => !pl.cover).slice(0, 10)
+    if (emptyList.length > 0) {
+      await Promise.all(emptyList.map(async (pl) => {
+        try {
+          const detail = await call('playlist_detail', { id: pl.id })
+          if (detail && detail.playlist && pickCover(detail.playlist)) {
+            pl.cover = resizePic(pickCover(detail.playlist), 300)
+          }
+        } catch (e) { /* 单个歌单补封面失败不影响整体 */ }
+      }))
+    }
+    const emptyCount = playlists.filter((pl) => !pl.cover).length
+    console.log(`[user/playlist] uid=${uid} 共${playlists.length}个歌单，封面为空${emptyCount}个`)
     return { code: 200, loggedIn: true, uid, playlists }
   },
+
+  // ============ 酷狗音源（/kugou/*，与网易云独立） ============
+  // 多用户登录态隔离：优先使用请求头 Cookie 里的酷狗登录态（App 扫码后自行保存并带回），
+  // 不带 Cookie 的请求（网页端/旧客户端）回退全局 kugou-cookie.json。
+  'kugou/search': async (q, p) => {
+    const keywords = q.get('keywords') || q.get('keyword') || ''
+    if (!keywords) throw Object.assign(new Error('缺少参数 keywords'), { status: 400 })
+    const data = await kugou.search(keywords, Number(q.get('page') || 1), Number(q.get('pagesize') || 30))
+    return Object.assign({ code: 200 }, data)
+  },
+
+  'kugou/song/url': async (q, p) => {
+    const hash = q.get('hash') || ''
+    if (!hash) throw Object.assign(new Error('缺少参数 hash'), { status: 400 })
+    const reqCookie = (als.getStore() && als.getStore().cookie) || ''
+    const data = await kugou.v5Url(hash, reqCookie)
+    // VIP/付费/无版权 → 按用户指定优先级兜底：网易云直取 → QQ(migu/ytdlp 补充) → B站（歌名+歌手强匹配）
+    if (data && data.blocked) {
+      const kw = [data.name, data.artist].filter(Boolean).join(' ')
+      if (kw) {
+        try {
+          // 1) 网易云强匹配搜索正版（最多3候选，依次尝试直取/解锁）
+          const nb = await call('cloudsearch', { keywords: kw, limit: 20, type: 1 })
+          const cands = neteaseCandidates(nb.result && nb.result.songs, data.name, data.artist)
+          // 1a) 网易云直取：仅信任正版 id（<20亿），歌名+歌手强匹配
+          for (const first of (cands.direct || [])) {
+            try {
+              const nbody = await call('song_url', { id: Number(first.id), br: 320000 })
+              const ndata = (nbody.data || [])[0] || {}
+              if (ndata.url && ndata.freeTrialInfo === null) {
+                return {
+                  code: 200,
+                  data: {
+                    id: hash,
+                    url: ndata.url,
+                    br: ndata.br || null,
+                    size: ndata.size || null,
+                    type: 'mp3',
+                    source: 'netease',
+                    unblocked: false,
+                    fallbackFrom: 'netease',
+                    name: data.name,
+                    artist: data.artist,
+                  },
+                }
+              }
+            } catch (e) { /* 该候选直取失败，继续 */ }
+          }
+          // 1b) 网易云受限/无正版 → unblock（QQ→migu→ytdlp），跳过酷狗（已试过）
+          for (const first of (cands.unblock || [])) {
+            try {
+              const un = await unblockSong(first.id, ['qq', 'migu', 'ytdlp'], {
+                id: Number(first.id) || 0,
+                name: data.name || '',
+                album: { name: data.album || '' },
+                artists: data.artist ? [{ name: data.artist }] : [],
+                duration: data.duration || 0,
+              })
+              if (un && un.url) {
+                return {
+                  code: 200,
+                  data: {
+                    id: hash,
+                    url: un.url,
+                    br: un.br || null,
+                    size: un.size || null,
+                    type: 'mp3',
+                    source: un.source || 'qq',
+                    unblocked: true,
+                    fallbackFrom: 'netease',
+                    name: data.name,
+                    artist: data.artist,
+                  },
+                }
+              }
+            } catch (e) { /* 该候选解锁失败，继续 */ }
+          }
+        } catch (e) {
+          console.error('[kugou] 网易云兜底失败', e && e.message)
+        }
+      }
+      // 2) B站强匹配搜索（歌名+歌手）→ 代理流
+      if (data.name) {
+        try {
+          const bs = await biliSearch((data.name + ' ' + (data.artist || '')).trim())
+          // 正版时长参考：酷狗正版 + QQ音乐正版（任一相近即采信）
+          const refDurs = []
+          if (data.duration) refDurs.push(Number(data.duration))
+          // QQ 正版前3候选时长（音频版/MV版都可能，307s官方MV可匹配306s候选）
+          const qdurs = await qqSearchDurations(data.name, data.artist)
+          for (const qd of qdurs) refDurs.push(qd)
+          const biliHit = strongPickBili(bs, data.name, data.artist, refDurs)
+          if (biliHit) {
+            const host = (p && p.headers && p.headers.host) || ('127.0.0.1:' + PORT)
+            return {
+              code: 200,
+              data: {
+                id: hash,
+                url: 'http://' + host + '/stream/bili?bvid=' + encodeURIComponent(biliHit.bvid),
+                type: 'mp3',
+                source: 'bilibili',
+                unblocked: true,
+                fallbackFrom: 'bilibili',
+                name: data.name,
+                artist: data.artist,
+              },
+            }
+          }
+        } catch (e) {
+          console.error('[kugou] B站兜底失败', e && e.message)
+        }
+      }
+      throw Object.assign(new Error('酷狗无免费音源，网易云/QQ/B站兜底均失败'), { status: 502 })
+    }
+    return { code: 200, data }
+  },
+
+  'kugou/login/qr': async (q, p) => {
+    const reqCookie = (als.getStore() && als.getStore().cookie) || ''
+    const key = await kugou.loginQrKey(reqCookie)
+    const r = await kugou.loginQrCreate(key)
+    return { code: 200, key: key, qrimg: r.qrimg, url: r.url }
+  },
+
+  'kugou/login/qr/check': async (q, p) => {
+    const reqCookie = (als.getStore() && als.getStore().cookie) || ''
+    const key = q.get('key') || q.get('qrcode') || ''
+    if (!key) throw Object.assign(new Error('缺少参数 key'), { status: 400 })
+    const r = await kugou.loginQrCheck(key, reqCookie)
+    const msgs = { 0: '二维码已过期', 1: '等待扫码', 2: '已扫码，等待确认', 4: '登录成功' }
+    const ok = r.status === 4
+    return {
+      code: 200,
+      status: r.status,
+      message: msgs[r.status] || '未知状态',
+      loggedIn: ok,
+      userid: r.userid,
+      cookie: ok ? r.cookie : '',
+    }
+  },
+
+  'kugou/user/playlist': async (q, p) => {
+    const reqCookie = (als.getStore() && als.getStore().cookie) || ''
+    return Object.assign({ code: 200 }, await kugou.userPlaylist(Number(q.get('page') || 1), Number(q.get('pagesize') || 30), reqCookie))
+  },
+
+  'kugou/playlist/detail': async (q, p) => {
+    const reqCookie = (als.getStore() && als.getStore().cookie) || ''
+    const id = q.get('id') || q.get('global_collection_id') || q.get('specialid') || ''
+    if (!id) throw Object.assign(new Error('缺少参数 id'), { status: 400 })
+    return Object.assign({ code: 200 }, await kugou.playlistDetail(id, reqCookie))
+  },
+
+  'kugou/recommend/daily': async (q, p) => {
+    const reqCookie = (als.getStore() && als.getStore().cookie) || ''
+    return Object.assign({ code: 200 }, await kugou.dailyRecommend(reqCookie))
+  },
+
+  'kugou/recommend/fm': async (q, p) => {
+    const reqCookie = (als.getStore() && als.getStore().cookie) || ''
+    return Object.assign({ code: 200 }, await kugou.fmRecommend(reqCookie))
+  },
+
+  'kugou/status': async (q, p) => {
+    const reqCookie = (als.getStore() && als.getStore().cookie) || ''
+    return Object.assign({ code: 200 }, kugou.status(reqCookie))
+  },
+
+  'kugou/logout': async (q, p) => {
+    const reqCookie = (als.getStore() && als.getStore().cookie) || ''
+    return Object.assign({ code: 200 }, kugou.logout(reqCookie))
+  },
+
+  // ---------------- QQ 音乐（扫码登录 / 歌单 / 每日推荐） ----------------
+  'qq/login/qr': async (q, p) => {
+    return Object.assign({ code: 200 }, await qq.loginQrKey())
+  },
+  'qq/login/qr/check': async (q, p) => {
+    const key = q.get('key') || ''
+    const ptqrtoken = q.get('ptqrtoken') || ''
+    const r = await qq.loginQrCheck(key, ptqrtoken)
+    return Object.assign({ code: 200 }, r)
+  },
+  'qq/user/playlist': async (q, p) => {
+    const reqCookie = (als.getStore() && als.getStore().cookie) || ''
+    return Object.assign({ code: 200 }, await qq.userPlaylists(reqCookie))
+  },
+  'qq/like/playlist': async (q, p) => {
+    const reqCookie = (als.getStore() && als.getStore().cookie) || ''
+    return Object.assign({ code: 200 }, await qq.likedPlaylist(reqCookie))
+  },
+  // QQ 收藏/取消收藏（act=add|del，默认 add）
+  'qq/like': async (q, p) => {
+    const songid = q.get('songid') || ''
+    const act = q.get('act') || 'add'
+    const reqCookie = (als.getStore() && als.getStore().cookie) || ''
+    return Object.assign({ code: 200 }, await qq.likeSong(songid, act !== 'del', reqCookie))
+  },
+  'qq/playlist/detail': async (q, p) => {
+    const id = q.get('id') || ''
+    const reqCookie = (als.getStore() && als.getStore().cookie) || ''
+    return Object.assign({ code: 200 }, await qq.playlistDetail(id, reqCookie))
+  },
+  'qq/recommend/daily': async (q, p) => {
+    const reqCookie = (als.getStore() && als.getStore().cookie) || ''
+    return Object.assign({ code: 200 }, await qq.dailyRecommend(reqCookie))
+  },
+  // QQ 取流：QQ 官方直链 → 失败走网易云强匹配 + 多源解锁兜底
+  'qq/song/url': async (q, p) => {
+    const mid = q.get('mid') || q.get('id') || ''
+    if (!mid) throw Object.assign(new Error('缺少参数 mid'), { status: 400 })
+    const reqCookie = (als.getStore() && als.getStore().cookie) || ''
+    const direct = await qq.songUrl(mid, q.get('br') === '320' ? '320' : '128', reqCookie)
+    if (direct) {
+      return { code: 200, data: { id: mid, url: direct.url, br: direct.br, source: 'qq' } }
+    }
+    // QQ 直链拿不到（VIP/无版权）→ 网易云搜索强匹配 → 解锁链
+    const name = q.get('name') || ''
+    const artist = q.get('artist') || ''
+    if (name) {
+      // 分层匹配（2026-09-08 v2，对齐"同名不同署名"场景）：
+      //   第1层：歌名去标点完全一致（如 SINOSDE NATAL FUNK ↔ SINOS DE NATAL FUNK!）
+      //         且时长在 ±25% 内（排除节选版）→ 层内按歌手命中 → 网易云搜索名次
+      //   第2层：歌手命中 + 时长 ±25%
+      //   第3层：仅时长 ±25%
+      //   第4层：其余包含关系
+      // 搜索名次反映网易云相关性，同名版本取排最前的（原版通常在前）
+      const stripPunct = (s) => String(s || '').replace(/[\s!！?？.。·、,，\-—:：'"“”‘’()（）[\]【】×*＊/+]/g, '').toLowerCase()
+      const pick = (songs, duration) => {
+        const tn = String(name || '').replace(/\s+/g, '').toLowerCase()
+        const tokens = String(artist || '').split(/[/、,&，;；\s]+/).filter(Boolean).map((t) => t.toLowerCase())
+        const dur = Number(duration) || 0
+        const durOk = (s) => dur <= 0 || s.duration <= 0 || Math.abs(dur - s.duration) / dur <= 0.25
+        const artistHitOf = (s) => {
+          const sa = String(s.artist || '').toLowerCase()
+          return tokens.length === 0 || tokens.some((t) => sa.includes(t))
+        }
+        const tiers = [[], [], [], []]
+        for (let i = 0; i < songs.length; i++) {
+          const s = songs[i]
+          const sn = String(s.name || '').replace(/\s+/g, '').toLowerCase()
+          if (!sn || !tn || !(sn.includes(tn) || tn.includes(sn))) continue
+          const nameEq = stripPunct(s.name) === stripPunct(name)
+          if (nameEq && durOk(s)) tiers[0].push({ s, i })
+          else if (artistHitOf(s) && durOk(s)) tiers[1].push({ s, i })
+          else if (durOk(s)) tiers[2].push({ s, i })
+          else tiers[3].push({ s, i })
+        }
+        for (const tier of tiers) {
+          if (!tier.length) continue
+          // 层内：歌手命中优先；否则取网易云搜索名次最靠前（原版/最相关版本）
+          const hit = tier.find((x) => artistHitOf(x.s))
+          return (hit || tier[0]).s
+        }
+        return null
+      }
+      try {
+        const searchKw = [name, artist].filter(Boolean).join(' ')
+        let body = await call('cloudsearch', { keywords: searchKw, limit: 10, type: 1 })
+        let songs = ((body.result && body.result.songs) || []).map((s) => ({
+          id: s.id, name: s.name, artist: (s.ar || []).map((a) => a.name).join(' / '), duration: s.dt || 0,
+        }))
+        let hit = pick(songs, Number(q.get('duration') || 0))
+        // 带歌手名搜不出命中时，退化为纯歌名再搜一次（歌手署名差异常见）
+        if (!hit && artist) {
+          body = await call('cloudsearch', { keywords: name, limit: 10, type: 1 })
+          songs = ((body.result && body.result.songs) || []).map((s) => ({
+            id: s.id, name: s.name, artist: (s.ar || []).map((a) => a.name).join(' / '), duration: s.dt || 0,
+          }))
+          hit = pick(songs, Number(q.get('duration') || 0))
+        }
+        if (hit) {
+          // 先试网易云官方直链：免费歌直接给官方 CDN，不折腾解锁源
+          try {
+            const freeBody = await call('song_url', { id: hit.id, br: 320000 })
+            const freeData = (freeBody.data || [])[0] || {}
+            if (freeData.url && freeData.freeTrialInfo === null) {
+              return { code: 200, data: { id: mid, url: freeData.url, br: 320000, source: 'netease', matched: { name: hit.name, artist: hit.artist } } }
+            }
+          } catch (e) { console.error('[qq] 网易云官方直链失败', e && e.message) }
+          // 官方直链拿不到（VIP/受限）→ 解锁源
+          const un = await unblockSong(hit.id, UNBLOCK_SOURCES)
+          if (un && un.url) {
+            return { code: 200, data: { id: mid, url: un.url, br: un.br || null, source: un.source || 'unblock', unblocked: true, matched: { name: hit.name, artist: hit.artist } } }
+          }
+        }
+      } catch (e) { console.error('[qq] 解锁兜底失败', e && e.message) }
+      // B站强匹配兜底（QQ 独家 VIP 歌，网易云无版权时）
+      try {
+        const bs = await biliSearch([name, artist].filter(Boolean).join(' '))
+        const hit = strongPickBili(bs, name, artist, Number(q.get('duration') || 0) ? [Number(q.get('duration'))] : [])
+        if (hit) {
+          const host = (p && p.headers && p.headers.host) || ('127.0.0.1:' + PORT)
+          return {
+            code: 200,
+            data: {
+              id: mid,
+              url: 'http://' + host + '/stream/bili?bvid=' + encodeURIComponent(hit.bvid),
+              type: 'mp3',
+              source: 'bilibili',
+              unblocked: true,
+              fallbackFrom: 'qq',
+              matched: { name: hit.name, artist: hit.artist || '' },
+            },
+          }
+        }
+      } catch (e) { console.error('[qq] B站兜底失败', e && e.message) }
+    }
+    throw Object.assign(new Error('该歌曲在 QQ 无直链且未找到可用替代源'), { status: 404 })
+  },
+  'qq/status': async (q, p) => {
+    const reqCookie = (als.getStore() && als.getStore().cookie) || ''
+    return Object.assign({ code: 200 }, qq.status(reqCookie))
+  },
+  'qq/logout': async (q, p) => {
+    const reqCookie = (als.getStore() && als.getStore().cookie) || ''
+    return Object.assign({ code: 200 }, qq.logout(reqCookie))
+  },
+
+  // ============ 汽水音乐音源（/soda/*，第4音源） ============
+  // 多用户登录态隔离：请求带 Cookie(汽水登录态) 用该用户账号，不带则回退全局 soda-cookie.txt
+  'soda/login/local': async (q, p) => {
+    return Object.assign({ code: 200 }, await soda.loginLocal())
+  },
+  'soda/login/qr': async (q, p) => {
+    return Object.assign({ code: 200 }, await soda.loginQrKey())
+  },
+  'soda/login/qr/check': async (q, p) => {
+    const key = q.get('key') || ''
+    const force = q.get('force') === '1' || q.get('force') === 'true'
+    return Object.assign({ code: 200 }, await soda.loginQrCheck(key, force))
+  },
+  'soda/login/sms/send': async (q, p) => {
+    const key = q.get('key') || ''
+    return await soda.smsSend(key)
+  },
+  'soda/login/sms/verify': async (q, p) => {
+    const key = q.get('key') || ''
+    const code = q.get('code') || ''
+    return await soda.smsVerify(key, code)
+  },
+  'soda/login/sms/code': async (q, p) => {
+    const mobile = q.get('mobile') || ''
+    return await soda.smsSendCode(mobile)
+  },
+  'soda/login/sms/login': async (q, p) => {
+    const mobile = q.get('mobile') || ''
+    const code = q.get('code') || ''
+    return await soda.smsLoginMobile(mobile, code)
+  },
+  'soda/status': async (q, p) => {
+    const reqCookie = (als.getStore() && als.getStore().cookie) || ''
+    return Object.assign({ code: 200 }, await soda.status(reqCookie))
+  },
+  'soda/logout': async (q, p) => {
+    const reqCookie = (als.getStore() && als.getStore().cookie) || ''
+    return Object.assign({ code: 200 }, soda.logout(reqCookie))
+  },
+  'soda/user/playlist': async (q, p) => {
+    const reqCookie = (als.getStore() && als.getStore().cookie) || ''
+    return Object.assign({ code: 200 }, await soda.userPlaylists(reqCookie, Number(q.get('page') || 1), Number(q.get('limit') || 30)))
+  },
+  'soda/playlist/detail': async (q, p) => {
+    const id = q.get('id') || ''
+    const reqCookie = (als.getStore() && als.getStore().cookie) || ''
+    return Object.assign({ code: 200 }, await soda.playlistDetail(id, reqCookie))
+  },
+  'soda/song/url': async (q, p) => {
+    const id = q.get('id') || q.get('track_id') || ''
+    const reqCookie = (als.getStore() && als.getStore().cookie) || ''
+    let r = null
+    let e502 = null
+    try {
+      r = await soda.songUrl(id, reqCookie)
+    } catch (e) {
+      if (e && e.status === 502) e502 = e
+      else throw e
+    }
+    // 直链可用（排除带 #auth= 的加密流占位）→ 直接返回
+    if (r && r.url && !String(r.url).includes('#auth=')) {
+      return Object.assign({ code: 200 }, r)
+    }
+    // 直链不可用（VIP 加密流 blocked / 无音源 502）→ 按 QQ 同款链路换源
+    const name = q.get('name') || (r && r.name) || ''
+    const artist = q.get('artist') || (r && r.artist) || ''
+    const duration = Number(q.get('duration') || 0) || (r && Number(r.duration) || 0) || 0
+    if (name) {
+      const host = (p && p.headers && p.headers.host) || ('127.0.0.1:' + PORT)
+      const fb = await fallbackSong(name, artist, duration, 'soda', host)
+      if (fb) {
+        return Object.assign({ code: 200 }, { id, ...fb })
+      }
+    }
+    if (e502) throw e502
+    return Object.assign({ code: 200 }, r)
+  },
+  'soda/lyric': async (q, p) => {
+    const id = q.get('id') || q.get('track_id') || ''
+    const reqCookie = (als.getStore() && als.getStore().cookie) || ''
+    return Object.assign({ code: 200 }, await soda.lyric(id, reqCookie))
+  },
+  'soda/search': async (q, p) => {
+    const keywords = q.get('keywords') || q.get('keyword') || ''
+    if (!keywords) throw Object.assign(new Error('缺少参数 keywords'), { status: 400 })
+    return Object.assign({ code: 200 }, await soda.search(keywords, Number(q.get('limit') || 30)))
+  },
+}
+
+// ---- 登录日志（本地专用，不上传 GitHub）----
+// admin-logger.js / .admin-config.json / login-log.json 均在 .gitignore 中
+// 开源版本无这些文件，try/catch 自动跳过，不影响正常运行
+let adminLogger = null
+try {
+  adminLogger = require('./admin-logger')
+  adminLogger.injectAdminRoutes(routes)
+} catch (e) {
+  // 文件不存在（如 GitHub 开源版本），静默跳过
 }
 
 const server = http.createServer(async (req, res) => {
@@ -681,10 +1486,18 @@ const server = http.createServer(async (req, res) => {
 
   const handler = routes[name]
 
+  // 汽水音乐模块未安装（公开仓库暂缓汽水登录）时，/soda/* 统一返回 404，避免 handler 里 soda 未定义报错
+  if (!soda && name.startsWith('soda/')) {
+    return send(res, 404, {
+      code: 404,
+      message: '汽水音乐模块未安装（暂缓）'
+    })
+  }
+
   if (!handler) {
     return send(res, 404, {
       code: 404,
-      message: '未知接口，可用接口: search / search/bili / song/url / song/url/unblock / song/url/bili / stream?url= / stream/bili?bvid= / lyric / song/detail / playlist / user/playlist / like / likelist / login/qr / login/qr/check / status / logout / recommend',
+      message: '未知接口，可用接口: search / search/bili / song/url / song/url/unblock / song/url/bili / stream?url= / stream/bili?bvid= / lyric / lyric/any / song/detail / playlist / user/playlist / like / likelist / qq/login/qr / qq/login/qr/check / qq/user/playlist / qq/playlist/detail / qq/recommend/daily / qq/song/url / qq/status / qq/logout / kugou/* / login/qr / login/qr/check / status / logout / recommend / radar / kugou/search / kugou/song/url / kugou/login/qr / kugou/login/qr/check / kugou/user/playlist / kugou/playlist/detail / kugou/recommend/daily / kugou/recommend/fm / kugou/status / kugou/logout / soda/login/qr / soda/login/qr/check / soda/status / soda/logout / soda/user/playlist / soda/playlist/detail / soda/song/url / soda/lyric / soda/search',
     })
   }
 
@@ -706,6 +1519,7 @@ server.listen(PORT, () => {
   console.log('  GET /search/bili?keywords=最伟大的作品&limit=20   (B站源，网易云没有的歌)')
   console.log('  GET /song/url?id=123&br=320000   (受限歌曲自动解锁)')
   console.log('  GET /lyric?id=123')
+  console.log('  GET /lyric/any?name=晴天&artist=周杰伦&duration=270000   (歌词多源兜底: 网易云→酷狗)')
   console.log('  GET /song/detail?ids=123,456')
   console.log('  GET /playlist?id=歌单id')
   console.log('  GET /user/playlist?uid=可选   (导入网易云歌单，uid留空用登录用户)')
@@ -714,4 +1528,10 @@ server.listen(PORT, () => {
   console.log('  GET /status  → 登录状态')
   console.log('  GET /recommend  → 每日推荐(需登录)')
   console.log(savedCookie ? '登录态: 已保存 cookie' : '登录态: 未登录（在线播放可能需要先登录）')
+  const kugouStatus = kugou.status()
+  console.log(kugouStatus.loggedIn ? '酷狗登录态(全局回退): 已登录 (userid=' + kugouStatus.user.id + ')' : '酷狗登录态(全局回退): 未登录')
+  console.log('  酷狗: /kugou/search /kugou/song/url /kugou/login/qr /kugou/login/qr/check /kugou/user/playlist /kugou/playlist/detail /kugou/recommend/daily /kugou/recommend/fm /kugou/status /kugou/logout')
+  console.log('  QQ: /qq/login/qr /qq/login/qr/check /qq/user/playlist /qq/playlist/detail /qq/recommend/daily /qq/song/url /qq/status /qq/logout')
+  console.log('  汽水: /soda/login/qr /soda/login/qr/check /soda/status /soda/logout /soda/user/playlist /soda/playlist/detail /soda/song/url /soda/lyric /soda/search')
+  console.log('  酷狗多用户隔离: 请求带 Cookie(酷狗登录态) 时使用该用户账号，互不覆盖')
 })

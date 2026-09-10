@@ -1,4 +1,4 @@
-/// 网易云歌单模型
+/// 网易云歌单模型（source 字段区分音源：'netease' / 'kugou'）
 library;
 
 class Playlist {
@@ -8,6 +8,14 @@ class Playlist {
   final int trackCount;
   final int playCount;
   final String creator;
+  /// 音源：'netease'（网易云）| 'kugou'（酷狗）| 'qq'（QQ音乐）
+  final String source;
+
+  /// 云端音源（酷狗/QQ）歌单原始字符串 id：
+  /// 酷狗如 collection_3_2532143314_2_0；QQ 为 dissid（如 7256913312）。
+  /// 云端歌单 id 无法可靠转 int（fromJson 里 _asInt 可能得 0），
+  /// 跳转详情必须用它。网易云歌单此字段为 null。
+  final String? kugouId;
 
   const Playlist({
     required this.id,
@@ -16,7 +24,13 @@ class Playlist {
     required this.trackCount,
     required this.playCount,
     required this.creator,
+    this.source = 'netease',
+    this.kugouId,
   });
+
+  /// 详情跳转用 id：云端音源（酷狗/QQ）一律用原始字符串 kugouId，网易云用数字 id
+  String get detailId =>
+      source == 'netease' ? id.toString() : (kugouId ?? '');
 
   /// 播放次数格式化（万 / 亿）
   String get playCountText {
@@ -52,9 +66,12 @@ class Playlist {
           ? j['name'].toString().trim()
           : '未知歌单',
       cover: cover,
-      trackCount: _asInt(j['trackCount']),
+      // QQ 后端歌单曲数字段叫 songCount，兜底兼容
+      trackCount: _asInt(j['trackCount'] ?? j['songCount']),
       playCount: _asInt(j['playCount']),
       creator: creator,
+      source: j['source']?.toString() ?? 'netease',
+      kugouId: j['source'] != 'netease' ? j['id']?.toString() : null,
     );
   }
 

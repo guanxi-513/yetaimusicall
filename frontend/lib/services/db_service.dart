@@ -42,7 +42,7 @@ class DbService {
     final dir = await getDatabasesPath();
     return openDatabase(
       p.join(dir, 'liquid_music.db'),
-      version: 3,
+      version: 6,
       onCreate: (db, v) async {
         await db.execute('''
           CREATE TABLE favorites (
@@ -54,6 +54,9 @@ class DbService {
             duration INTEGER NOT NULL,
             source TEXT NOT NULL DEFAULT 'netease',
             bvid TEXT,
+            hash TEXT,
+            mid TEXT,
+            songId INTEGER NOT NULL DEFAULT 0,
             created_at INTEGER NOT NULL
           )
         ''');
@@ -67,6 +70,9 @@ class DbService {
             duration INTEGER NOT NULL,
             source TEXT NOT NULL DEFAULT 'netease',
             bvid TEXT,
+            hash TEXT,
+            mid TEXT,
+            songId INTEGER NOT NULL DEFAULT 0,
             played_at INTEGER NOT NULL
           )
         ''');
@@ -90,14 +96,30 @@ class DbService {
           await db.execute(
             "ALTER TABLE favorites ADD COLUMN source TEXT NOT NULL DEFAULT 'netease'",
           );
-          await db.execute(
-            'ALTER TABLE favorites ADD COLUMN bvid TEXT',
-          );
+          await db.execute('ALTER TABLE favorites ADD COLUMN bvid TEXT');
           await db.execute(
             "ALTER TABLE play_history ADD COLUMN source TEXT NOT NULL DEFAULT 'netease'",
           );
+          await db.execute('ALTER TABLE play_history ADD COLUMN bvid TEXT');
+        }
+        if (oldV < 4) {
+          // 酷狗接入：hash 为酷狗歌曲取流主键（/kugou/song/url?hash=）
+          await db.execute('ALTER TABLE favorites ADD COLUMN hash TEXT');
+          await db.execute('ALTER TABLE play_history ADD COLUMN hash TEXT');
+        }
+        if (oldV < 5) {
+          // QQ 音源接入：mid 为 QQ 歌曲 songmid（/qq/song/url?mid= 取流主键）
+          await db.execute('ALTER TABLE favorites ADD COLUMN mid TEXT');
+          await db.execute('ALTER TABLE play_history ADD COLUMN mid TEXT');
+        }
+        if (oldV < 6) {
+          // QQ 收藏同步：songId 为 QQ 数字歌曲 id（/qq/like?songid= 用）
+          // 注意：默认值为 0，旧数据迁移后 QQ 歌本地收藏无法回同步（在线歌曲不受影响）
           await db.execute(
-            'ALTER TABLE play_history ADD COLUMN bvid TEXT',
+            'ALTER TABLE favorites ADD COLUMN songId INTEGER NOT NULL DEFAULT 0',
+          );
+          await db.execute(
+            'ALTER TABLE play_history ADD COLUMN songId INTEGER NOT NULL DEFAULT 0',
           );
         }
       },
@@ -107,11 +129,15 @@ class DbService {
   // ---------- 收藏 ----------
 
   static Future<bool> isFavorite(int id) => _guard('isFavorite', () async {
-        final db = await database;
-        final rows = await db.query('favorites',
-            where: 'id = ?', whereArgs: [id], limit: 1);
-        return rows.isNotEmpty;
-      });
+    final db = await database;
+    final rows = await db.query(
+      'favorites',
+      where: 'id = ?',
+      whereArgs: [id],
+      limit: 1,
+    );
+    return rows.isNotEmpty;
+  });
 
   static Future<void> toggleFavorite(Song song) =>
       _guard('toggleFavorite(${song.id})', () async {
@@ -128,17 +154,17 @@ class DbService {
       });
 
   static Future<List<Song>> favorites() => _guard('favorites', () async {
-        final db = await database;
-        final rows = await db.query('favorites', orderBy: 'created_at DESC');
-        return rows.map(Song.fromDb).toList();
-      });
+    final db = await database;
+    final rows = await db.query('favorites', orderBy: 'created_at DESC');
+    return rows.map(Song.fromDb).toList();
+  });
 
   /// 收藏 ID 集合（用于列表页快速判断红心状态）
   static Future<Set<int>> favoriteIds() => _guard('favoriteIds', () async {
-        final db = await database;
-        final rows = await db.query('favorites', columns: ['id']);
-        return rows.map((r) => r['id'] as int).toSet();
-      });
+    final db = await database;
+    final rows = await db.query('favorites', columns: ['id']);
+    return rows.map((r) => r['id'] as int).toSet();
+  });
 
   // ---------- 播放历史 ----------
 
@@ -154,18 +180,26 @@ class DbService {
   static Future<List<Song>> history({int limit = 100}) =>
       _guard('history', () async {
         final db = await database;
-        final rows = await db.query('play_history',
-            orderBy: 'played_at DESC', limit: limit);
+        final rows = await db.query(
+          'play_history',
+          orderBy: 'played_at DESC',
+          limit: limit,
+        );
         return rows.map(Song.fromDb).toList();
       });
 
   // ---------- 搜索历史 ----------
 
   /// 读取搜索历史（按时间倒序，最多 [limit] 条）
-  static Future<List<String>> searchHistory({int limit = AppConfig.kMaxSearchHistory}) async {
+  static Future<List<String>> searchHistory({
+    int limit = AppConfig.kMaxSearchHistory,
+  }) async {
     final db = await database;
-    final rows = await db.query('search_history',
-        orderBy: 'time DESC', limit: limit);
+    final rows = await db.query(
+      'search_history',
+      orderBy: 'time DESC',
+      limit: limit,
+    );
     return rows.map((r) => r['keyword'] as String).toList();
   }
 
@@ -181,8 +215,10 @@ class DbService {
     }, conflictAlgorithm: ConflictAlgorithm.replace);
     // 超出上限：删掉最旧的若干条
     final count =
-        Sqflite.firstIntValue(await db.rawQuery('SELECT COUNT(*) FROM search_history')) ??
-            0;
+        Sqflite.firstIntValue(
+          await db.rawQuery('SELECT COUNT(*) FROM search_history'),
+        ) ??
+        0;
     final max = AppConfig.kMaxSearchHistory;
     if (count > max) {
       await db.rawDelete(
@@ -195,7 +231,11 @@ class DbService {
 
   static Future<void> deleteSearchHistory(String keyword) async {
     final db = await database;
-    await db.delete('search_history', where: 'keyword = ?', whereArgs: [keyword]);
+    await db.delete(
+      'search_history',
+      where: 'keyword = ?',
+      whereArgs: [keyword],
+    );
   }
 
   static Future<void> clearSearchHistory() async {

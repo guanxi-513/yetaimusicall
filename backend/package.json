@@ -9,6 +9,8 @@
   },
   "dependencies": {
     "@neteasecloudmusicapienhanced/api": "^4.36.1",
-    "@unblockneteasemusic/server": "^0.28.0"
+    "@unblockneteasemusic/server": "^0.28.0",
+    "qrcode": "^1.5.4",
+    "ws": "^8.21.3"
   }
 }

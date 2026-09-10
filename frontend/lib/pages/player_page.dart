@@ -22,14 +22,59 @@ class PlayerPage extends StatefulWidget {
   State<PlayerPage> createState() => _PlayerPageState();
 }
 
-class _PlayerPageState extends State<PlayerPage> {
+class _PlayerPageState extends State<PlayerPage>
+    with TickerProviderStateMixin {
   final ScrollController _lyricController = ScrollController();
   int _lastLyricIndex = -1;
   bool _userScrolling = false;
 
+  // ---------- 下拉关闭 ----------
+  double _dy = 0; // 当前下拉偏移（只增不减，拖动中跟随手指）
+
+  /// 关闭动画：继续下移 500 + 淡出（easeInCubic 模拟重力加速）
+  late final AnimationController _closeCtrl = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 250),
+    value: 0,
+  );
+  // 弹回动画：松手不足阈值时回到原位（easeOutBack 弹性）
+  late final AnimationController _returnCtrl = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 260),
+    value: 0,
+  );
+  Animation<double>? _returnTween;
+
+  void _onDragUpdate(DragUpdateDetails details) {
+    if (_closeCtrl.isAnimating) return;
+    if (details.delta.dy <= 0) return; // 只响应向下拖动
+    setState(() => _dy += details.delta.dy);
+  }
+
+  void _onDragEnd(DragEndDetails details) {
+    if (_closeCtrl.isAnimating) return;
+    final h = MediaQuery.of(context).size.height;
+    if (_dy > h * 0.15) {
+      // 触发关闭：向下滑出 + 淡出，然后 pop
+      _closeCtrl.forward().then((_) {
+        if (mounted) Navigator.of(context).pop();
+      });
+    } else {
+      // 弹回原位（弹性动画）
+      _returnTween = Tween(begin: _dy, end: 0.0).animate(
+        CurvedAnimation(parent: _returnCtrl, curve: Curves.easeOutBack),
+      );
+      _returnCtrl.forward(from: 0).whenComplete(() {
+        if (mounted) setState(() => _dy = 0);
+      });
+    }
+  }
+
   @override
   void dispose() {
     _lyricController.dispose();
+    _closeCtrl.dispose();
+    _returnCtrl.dispose();
     super.dispose();
   }
 
@@ -52,95 +97,105 @@ class _PlayerPageState extends State<PlayerPage> {
     final song = player.currentDetail ?? player.current;
     _autoScrollLyrics(player.currentLyricIndex, player.lyrics.length);
 
-    return GlassBackground(
-      child: Scaffold(
-        backgroundColor: Colors.transparent,
-        appBar: AppBar(
-          backgroundColor: Colors.transparent,
-          elevation: 0,
-          centerTitle: true,
-          leading: IconButton(
-            icon: const Icon(Icons.keyboard_arrow_down,
-                color: Colors.white, size: 32),
-            onPressed: () => Navigator.pop(context),
-          ),
-          title: Text(
-            song?.name ?? '未在播放',
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 16,
-              fontWeight: FontWeight.w600,
+    // 下拉关闭：手指拖动整页下移 + 透明度渐降 + 微缩放
+    return GestureDetector(
+      onVerticalDragUpdate: _onDragUpdate,
+      onVerticalDragEnd: _onDragEnd,
+      child: AnimatedBuilder(
+        animation: Listenable.merge([_closeCtrl, _returnCtrl]),
+        // child 缓存：拖动/关闭动画只重算变换，不重建页面内容
+        child: GlassBackground(
+          child: Scaffold(
+            backgroundColor: Colors.transparent,
+            appBar: AppBar(
+              backgroundColor: Colors.transparent,
+              elevation: 0,
+              centerTitle: true,
+              leading: IconButton(
+                icon: const Icon(Icons.keyboard_arrow_down,
+                    color: Colors.white, size: 32),
+                onPressed: () => Navigator.pop(context),
+              ),
+              title: Text(
+                song?.name ?? '未在播放',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              actions: [
+                if (song != null) ...[
+                  // 音质选择按钮
+                  Padding(
+                    padding: const EdgeInsets.only(right: 4),
+                    child: IconButton(
+                      icon: Icon(Icons.high_quality,
+                          color: Colors.white.withOpacity(0.85), size: 24),
+                      tooltip:
+                          '音质：${_qualityLabel(AppConfig.audioQuality)}',
+                      onPressed: () => _showQualitySheet(context),
+                    ),
+                  ),
+                  // 播放队列按钮
+                  Padding(
+                    padding: const EdgeInsets.only(right: 4),
+                    child: IconButton(
+                      icon: Icon(Icons.queue_music,
+                          color: Colors.white.withOpacity(0.85), size: 24),
+                      onPressed: () => _showQueueSheet(context, player),
+                    ),
+                  ),
+                  // 爱心（点击弹跳 + 收藏切换）
+                  Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: _BouncingHeart(player: player, song: song),
+                  ),
+                ],
+              ],
+            ),
+            body: SafeArea(
+              bottom: false,
+              child: song == null
+                  ? const Center(
+                      child: Text('没有正在播放的歌曲',
+                          style: TextStyle(color: Colors.white54)),
+                    )
+                  : OrientationBuilder(
+                      builder: (context, orientation) =>
+                          orientation == Orientation.landscape
+                              ? Row(
+                                  children: [
+                                    Expanded(
+                                      child:
+                                          _CoverDisc(song: song, player: player),
+                                    ),
+                                    Expanded(
+                                        child: _buildRightPanel(player)),
+                                  ],
+                                )
+                              : _buildPortrait(player, song),
+                    ),
             ),
           ),
-          actions: [
-            if (song != null) ...[
-              // 音质选择按钮
-              Padding(
-                padding: const EdgeInsets.only(right: 4),
-                child: IconButton(
-                  icon: Icon(Icons.high_quality,
-                      color: Colors.white.withOpacity(0.85), size: 24),
-                  tooltip: '音质：${_qualityLabel(AppConfig.audioQuality)}',
-                  onPressed: () => _showQualitySheet(context),
-                ),
-              ),
-              // 播放队列按钮
-              Padding(
-                padding: const EdgeInsets.only(right: 4),
-                child: IconButton(
-                  icon: Icon(Icons.queue_music,
-                      color: Colors.white.withOpacity(0.85), size: 24),
-                  onPressed: () => _showQueueSheet(context, player),
-                ),
-              ),
-              // 爱心
-              Padding(
-                padding: const EdgeInsets.only(right: 8),
-                child: IconButton(
-                  icon: Icon(
-                    player.isFavorite(song) ? Icons.favorite : Icons.favorite_border,
-                    color: player.isFavorite(song)
-                        ? const Color(0xFFE05A8A)
-                        : Colors.white70,
-                    size: 24,
-                  ),
-                  onPressed: () async {
-                    final loggedIn = context.read<AuthState>().loggedIn;
-                    final result = await player.toggleFavorite(song, loggedIn: loggedIn);
-                    if (!context.mounted) return;
-                    // B站歌只做本地收藏，无提示；'ok' 已同步网易云，静默
-                    if (song.isBilibili || result == 'ok') return;
-                    if (result == 'local') {
-                      _toast(context, '未登录，仅本地收藏');
-                    } else if (result == 'error') {
-                      _toast(context, '网络异常，仅本地收藏');
-                    }
-                  },
-                ),
-              ),
-            ],
-          ],
         ),
-        body: SafeArea(
-          child: song == null
-              ? const Center(
-                  child: Text('没有正在播放的歌曲',
-                      style: TextStyle(color: Colors.white54)),
-                )
-              : OrientationBuilder(
-                  builder: (context, orientation) =>
-                      orientation == Orientation.landscape
-                          ? Row(
-                              children: [
-                                Expanded(
-                                  child: _CoverDisc(song: song, player: player),
-                                ),
-                                Expanded(child: _buildRightPanel(player)),
-                              ],
-                            )
-                          : _buildPortrait(player, song),
-                ),
-        ),
+        builder: (context, child) {
+          // 关闭动画时弹回动画不存在 → 用 _dy；弹回动画播放中 → 用插值
+          final dy =
+              _returnCtrl.isAnimating ? (_returnTween?.value ?? 0) : _dy;
+          final progress = (dy / 400).clamp(0.0, 1.0); // 下拉进度
+          final totalDy = dy + _closeCtrl.value * 500; // 关闭时继续下移出屏
+          final opacity =
+              (1.0 - progress - _closeCtrl.value * 0.5).clamp(0.0, 1.0);
+          final scale = 1.0 - progress * 0.05;
+          return Transform.translate(
+            offset: Offset(0, totalDy),
+            child: Opacity(
+              opacity: opacity,
+              child: Transform.scale(scale: scale, child: child),
+            ),
+          );
+        },
       ),
     );
   }
@@ -832,10 +887,17 @@ class _Controls extends StatelessWidget {
                       valueColor: AlwaysStoppedAnimation(Colors.white),
                     ),
                   )
-                : Icon(
-                    player.playing ? Icons.pause : Icons.play_arrow,
-                    size: 40,
-                    color: Colors.white,
+                // 播放/暂停图标切换：缩放过渡
+                : AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 200),
+                    transitionBuilder: (child, anim) =>
+                        ScaleTransition(scale: anim, child: child),
+                    child: Icon(
+                      player.playing ? Icons.pause : Icons.play_arrow,
+                      key: ValueKey(player.playing),
+                      size: 40,
+                      color: Colors.white,
+                    ),
                   ),
           ),
           const SizedBox(width: 28),
@@ -879,11 +941,8 @@ class _LyricsPanelState extends State<_LyricsPanel> {
 
     Widget panelChild;
     if (lyrics.isEmpty) {
-      // B站源歌曲无歌词接口
-      final currentSong = player.current;
-      final msg = currentSong?.isBilibili == true
-          ? '该来源暂无歌词，仅支持播放'
-          : (player.translation.isEmpty ? '暂无歌词' : '');
+      // 匹配不到时统一提示（多源兜底已覆盖酷狗/B站）
+      final msg = player.translation.isEmpty ? '暂无歌词' : '';
       panelChild = Center(
         child: Text(
           msg,
@@ -1075,4 +1134,80 @@ void _toast(BuildContext context, String msg) {
       behavior: SnackBarBehavior.floating,
     ),
   );
+}
+
+/// 播放页转场：从底部向上滑入（迷你播放条 / 首页一键播放共用）
+Route<T> playerRoute<T>() {
+  return PageRouteBuilder(
+    opaque: false,
+    transitionDuration: const Duration(milliseconds: 320),
+    reverseTransitionDuration: const Duration(milliseconds: 280),
+    pageBuilder: (_, anim, __) => const PlayerPage(),
+    transitionsBuilder: (_, anim, __, child) {
+      final tween = Tween(begin: const Offset(0, 1), end: Offset.zero)
+          .chain(CurveTween(curve: Curves.easeOutCubic));
+      return SlideTransition(position: anim.drive(tween), child: child);
+    },
+  );
+}
+
+/// 播放页红心：点击弹跳脉冲 + 收藏切换（双写语义）
+class _BouncingHeart extends StatefulWidget {
+  final PlayerState player;
+  final Song song;
+  const _BouncingHeart({required this.player, required this.song});
+
+  @override
+  State<_BouncingHeart> createState() => _BouncingHeartState();
+}
+
+class _BouncingHeartState extends State<_BouncingHeart> {
+  bool _pulse = false;
+  bool _busy = false;
+
+  Future<void> _toggle() async {
+    if (_busy) return;
+    _busy = true;
+    // 弹跳脉冲：1.0 → 1.3 → 1.0
+    if (mounted) setState(() => _pulse = true);
+    Future.delayed(const Duration(milliseconds: 130), () {
+      if (mounted) setState(() => _pulse = false);
+    });
+    final loggedIn = context.read<AuthState>().loggedIn;
+    final result =
+        await widget.player.toggleFavorite(widget.song, loggedIn: loggedIn);
+    _busy = false;
+    if (!mounted) return;
+    // B站/酷狗歌只做本地收藏，无提示；'ok' 已同步网易云，静默
+    if (widget.song.isBilibili || widget.song.isKugou || result == 'ok') {
+      return;
+    }
+    if (result == 'local') {
+      _toast(context, '未登录，仅本地收藏');
+    } else if (result == 'error') {
+      _toast(context, '网络异常，仅本地收藏');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final fav = widget.player.isFavorite(widget.song);
+    return GestureDetector(
+      onTap: _toggle,
+      behavior: HitTestBehavior.opaque,
+      child: AnimatedScale(
+        scale: _pulse ? 1.3 : 1.0,
+        duration: const Duration(milliseconds: 130),
+        curve: _pulse ? Curves.easeOut : Curves.easeOutBack,
+        child: Padding(
+          padding: const EdgeInsets.all(8),
+          child: Icon(
+            fav ? Icons.favorite : Icons.favorite_border,
+            color: fav ? const Color(0xFFE05A8A) : Colors.white70,
+            size: 24,
+          ),
+        ),
+      ),
+    );
+  }
 }

@@ -7,8 +7,10 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../models/song.dart';
 import '../pages/player_page.dart';
 import '../state/player_state.dart';
+import 'tap_scale.dart';
 
 class MiniPlayerBar extends StatelessWidget implements PreferredSizeWidget {
   const MiniPlayerBar({super.key});
@@ -20,19 +22,29 @@ class MiniPlayerBar extends StatelessWidget implements PreferredSizeWidget {
   Widget build(BuildContext context) {
     final player = context.watch<PlayerState>();
     final song = player.current;
-    if (song == null) return const SizedBox.shrink();
 
+    // 展开/收起平滑动画（无歌时收起为 0 高度）
+    return AnimatedSize(
+      duration: const Duration(milliseconds: 250),
+      curve: Curves.easeInOut,
+      alignment: Alignment.bottomCenter,
+      child: song == null
+          ? const SizedBox(width: double.infinity)
+          : _Bar(player: player, song: song),
+    );
+  }
+}
+
+class _Bar extends StatelessWidget {
+  final PlayerState player;
+  final Song song;
+
+  const _Bar({required this.player, required this.song});
+
+  @override
+  Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: () => Navigator.of(context).push(
-        PageRouteBuilder(
-          opaque: false,
-          transitionDuration: const Duration(milliseconds: 320),
-          pageBuilder: (_, anim, __) => FadeTransition(
-            opacity: anim,
-            child: const PlayerPage(),
-          ),
-        ),
-      ),
+      onTap: () => Navigator.of(context).push(playerRoute()),
       child: Container(
         margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
         decoration: BoxDecoration(
@@ -50,7 +62,8 @@ class MiniPlayerBar extends StatelessWidget implements PreferredSizeWidget {
           child: BackdropFilter(
             filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               decoration: BoxDecoration(
                 gradient: LinearGradient(
                   begin: Alignment.topLeft,
@@ -60,7 +73,8 @@ class MiniPlayerBar extends StatelessWidget implements PreferredSizeWidget {
                     Colors.white.withOpacity(0.08),
                   ],
                 ),
-                border: Border.all(color: Colors.white.withOpacity(0.28), width: 1),
+                border:
+                    Border.all(color: Colors.white.withOpacity(0.28), width: 1),
                 borderRadius: BorderRadius.circular(20),
               ),
               child: Row(
@@ -71,18 +85,20 @@ class MiniPlayerBar extends StatelessWidget implements PreferredSizeWidget {
                     height: 42,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      border:
-                          Border.all(color: Colors.white.withOpacity(0.35), width: 1),
+                      border: Border.all(
+                          color: Colors.white.withOpacity(0.35), width: 1),
                     ),
                     child: ClipOval(
                       child: (player.currentDetail ?? song).cover.isEmpty
                           ? Container(
                               color: Colors.white.withOpacity(0.12),
                               child: Icon(Icons.music_note,
-                                  color: Colors.white.withOpacity(0.7), size: 20),
+                                  color: Colors.white.withOpacity(0.7),
+                                  size: 20),
                             )
                           : CachedNetworkImage(
-                              imageUrl: (player.currentDetail ?? song).cover,
+                              imageUrl:
+                                  (player.currentDetail ?? song).cover,
                               fit: BoxFit.cover,
                             ),
                     ),
@@ -116,8 +132,9 @@ class MiniPlayerBar extends StatelessWidget implements PreferredSizeWidget {
                       ],
                     ),
                   ),
-                  // 上一首
-                  GestureDetector(
+                  // 上一首（按压缩放反馈）
+                  TapScale(
+                    pressScale: 0.85,
                     onTap: player.previous,
                     child: Padding(
                       padding: const EdgeInsets.all(6),
@@ -131,8 +148,9 @@ class MiniPlayerBar extends StatelessWidget implements PreferredSizeWidget {
                   // 播放/暂停
                   _PlayPauseIcon(player: player),
                   const SizedBox(width: 8),
-                  // 下一首
-                  GestureDetector(
+                  // 下一首（按压缩放反馈）
+                  TapScale(
+                    pressScale: 0.85,
                     onTap: player.next,
                     child: Padding(
                       padding: const EdgeInsets.all(6),
@@ -159,7 +177,8 @@ class _PlayPauseIcon extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return TapScale(
+      pressScale: 0.88,
       onTap: player.togglePlay,
       child: Container(
         width: 38,
@@ -174,13 +193,21 @@ class _PlayPauseIcon extends StatelessWidget {
                 padding: const EdgeInsets.all(10),
                 child: CircularProgressIndicator(
                   strokeWidth: 2,
-                  valueColor: AlwaysStoppedAnimation(Colors.white.withOpacity(0.9)),
+                  valueColor:
+                      AlwaysStoppedAnimation(Colors.white.withOpacity(0.9)),
                 ),
               )
-            : Icon(
-                player.playing ? Icons.pause : Icons.play_arrow,
-                color: Colors.white,
-                size: 24,
+            // 播放/暂停图标切换：缩放过渡
+            : AnimatedSwitcher(
+                duration: const Duration(milliseconds: 200),
+                transitionBuilder: (child, anim) =>
+                    ScaleTransition(scale: anim, child: child),
+                child: Icon(
+                  player.playing ? Icons.pause : Icons.play_arrow,
+                  key: ValueKey(player.playing),
+                  color: Colors.white,
+                  size: 24,
+                ),
               ),
       ),
     );

@@ -82,7 +82,13 @@ class LiquidAudioHandler extends BaseAudioHandler {
   /// 当前歌曲变化时由 PlayerState 调用 → 更新通知/锁屏元数据
   void updateSong(Song song) {
     mediaItem.add(MediaItem(
-      id: song.isBilibili ? (song.bvid ?? 'bili_${song.id}') : '${song.id}',
+      id: song.isBilibili
+          ? (song.bvid ?? 'bili_${song.id}')
+          : song.isKugou
+              ? (song.hash ?? 'kg_${song.id}')
+              : song.isQQ
+                  ? (song.mid ?? 'qq_${song.id}')
+                  : '${song.id}',
       title: song.name,
       artist: song.artists.join(' / '),
       album: song.album,

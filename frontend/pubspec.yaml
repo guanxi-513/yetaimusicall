@@ -51,6 +51,8 @@ dependencies:
   # 音源服务地址等设置持久化
   shared_preferences: ^2.3.2
   path: ^1.9.0
+  # 高刷新率适配（90Hz/120Hz 屏幕）
+  flutter_displaymode: ^0.6.0
 
 dev_dependencies:
   flutter_test:

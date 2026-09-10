@@ -9,6 +9,7 @@ import '../models/song.dart';
 import '../state/auth_state.dart';
 import '../state/player_state.dart';
 import 'glass_card.dart';
+import 'tap_scale.dart';
 
 /// 红心语义（三种独立收藏体系）
 enum HeartMode {
@@ -57,7 +58,8 @@ class SongTile extends StatelessWidget {
       HeartMode.global => player.isFavorite(song),
     };
 
-    return GlassCard(
+    // 列表项 stagger 淡入：按 index 递延 40ms，只在首次构建时播一次
+    final card = GlassCard(
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       borderRadius: 18,
@@ -172,6 +174,23 @@ class SongTile extends StatelessWidget {
         ],
       ),
     );
+
+    // 按压缩放反馈（不接管点击，点击仍由 GlassCard 内部处理）
+    final scaled = TapScale(pressScale: 0.98, child: card);
+    if (index == null) return scaled;
+    // stagger 淡入：index 越大延迟越久（只在首次构建时播一次）
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0.0, end: 1.0),
+      duration: const Duration(milliseconds: 260),
+      curve: Interval(
+        (index! * 0.04).clamp(0.0, 0.6),
+        1.0,
+        curve: Curves.easeOut,
+      ),
+      builder: (context, v, child) =>
+          Opacity(opacity: v, child: Transform.translate(offset: Offset(0, (1 - v) * 8), child: child)),
+      child: scaled,
+    );
   }
 }
 
@@ -242,7 +261,10 @@ class _FavoriteButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    // TapScale：按压缩放 + 点击弹跳脉冲（爱心点赞效果）
+    return TapScale(
+      pulseOnTap: true,
+      pressScale: 0.85,
       onTap: () async {
         final player = context.read<PlayerState>();
         String result;
@@ -266,8 +288,10 @@ class _FavoriteButton extends StatelessWidget {
         }
         if (!context.mounted) return;
         if (heartMode == HeartMode.global) {
-          // B站歌只做本地收藏，无提示；'ok' 已同步网易云，静默
-          if (song.isBilibili || result == 'ok') return;
+          // B站/酷狗/QQ歌只做本地收藏，无提示；'ok' 已同步网易云，静默
+          if (song.isBilibili || song.isKugou || song.isQQ || result == 'ok') {
+            return;
+          }
           if (result == 'local') {
             _toast(context, '未登录，仅本地收藏');
           } else if (result == 'error') {
@@ -277,7 +301,6 @@ class _FavoriteButton extends StatelessWidget {
           _toast(context, '网络异常，操作失败');
         }
       },
-      behavior: HitTestBehavior.opaque,
       child: Padding(
         padding: const EdgeInsets.all(6),
         child: Icon(

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_displaymode/flutter_displaymode.dart';
 import 'package:provider/provider.dart';
 
 import 'config.dart';
@@ -36,6 +37,10 @@ Future<void> main() async {
     ),
   );
 
+  // 高刷新率适配（90Hz/120Hz）：Android 默认锁 60Hz，这里请求设备最高模式。
+  // 不阻塞启动，失败（不支持的设备）静默忽略。
+  unawaited(setHighRefreshRate());
+
   // 创建全局状态并接线（不依赖 audio_service）：
   // - MediaNotificationBridge ← PlayerState（自定义通知：歌词 + 收藏按钮）
   playerState = PlayerState();
@@ -45,6 +50,20 @@ Future<void> main() async {
   // 先显示首屏；audio_service 在后台初始化，不再阻塞启动
   runApp(const LiquidMusicApp());
   unawaited(_initAudioService());
+}
+
+/// 请求设备支持的最高屏幕刷新率
+Future<void> setHighRefreshRate() async {
+  try {
+    final modes = await FlutterDisplayMode.supported;
+    if (modes.isEmpty) return;
+    // 选刷新率最高的模式
+    final best =
+        modes.reduce((a, b) => a.refreshRate > b.refreshRate ? a : b);
+    await FlutterDisplayMode.setPreferredMode(best);
+  } catch (_) {
+    // 部分设备/平台不支持，忽略
+  }
 }
 
 /// 后台初始化 audio_service（后台播放 + 系统媒体通知）。

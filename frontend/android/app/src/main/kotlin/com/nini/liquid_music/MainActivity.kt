@@ -19,6 +19,19 @@ class MainActivity : AudioServiceActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // 高刷新率适配：请求屏幕支持的最高刷新率模式（flutter_displaymode 的
+        // 原生兜底；Build.VERSION_CODES.M = API 23）
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            try {
+                val modes = window.windowManager.defaultDisplay?.supportedModes
+                val best = modes?.maxByOrNull { it.refreshRate }
+                if (best != null) {
+                    window.attributes.preferredDisplayModeId = best.modeId
+                }
+            } catch (_: Exception) {
+                // 部分设备 display 未就绪，忽略
+            }
+        }
         // Android 13+ 运行时申请通知权限（媒体通知必需，首次启动弹一次）
         if (Build.VERSION.SDK_INT >= 33 &&
             ContextCompat.checkSelfPermission(
