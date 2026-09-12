@@ -1,14 +1,15 @@
-/// 榜单页：固定榜单列表（玻璃卡片网格），点击进歌单详情
+﻿/// 榜单页：固定榜单列表（玻璃卡片网格），点击进歌单详情
 library;
 
 import 'package:flutter/material.dart';
+import '../state/ui_settings.dart';
 
 import '../config.dart';
 import 'playlist_detail_page.dart';
 import '../widgets/glass_card.dart';
 
 class ChartsPage extends StatefulWidget {
-  const ChartsPage({super.key});
+  ChartsPage({super.key});
 
   @override
   State<ChartsPage> createState() => _ChartsPageState();
@@ -23,15 +24,15 @@ class _ChartsPageState extends State<ChartsPage>
   Widget build(BuildContext context) {
     super.build(context);
     return CustomScrollView(
-      physics: const AlwaysScrollableScrollPhysics(),
+      physics: AlwaysScrollableScrollPhysics(),
       slivers: [
-        const SliverToBoxAdapter(
+        SliverToBoxAdapter(
           child: Padding(
             padding: EdgeInsets.fromLTRB(20, 14, 20, 10),
             child: Text(
               '排行榜',
               style: TextStyle(
-                color: Colors.white,
+                color: fgPrimary,
                 fontSize: 22,
                 fontWeight: FontWeight.w700,
                 letterSpacing: 1.0,
@@ -45,16 +46,16 @@ class _ChartsPageState extends State<ChartsPage>
             child: Text(
               '云音乐官方榜单，每日更新',
               style: TextStyle(
-                color: Colors.white.withOpacity(0.45),
+                color: fgPrimary.withOpacity(0.45),
                 fontSize: 12,
               ),
             ),
           ),
         ),
         SliverPadding(
-          padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
+          padding: EdgeInsets.fromLTRB(16, 10, 16, 16),
           sliver: SliverGrid(
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
               crossAxisCount: 2,
               mainAxisSpacing: 12,
               crossAxisSpacing: 12,
@@ -76,7 +77,7 @@ class _ChartsPageState extends State<ChartsPage>
 
 class _ChartCard extends StatelessWidget {
   final BoardChart chart;
-  const _ChartCard({required this.chart});
+  _ChartCard({required this.chart});
 
   @override
   Widget build(BuildContext context) {
@@ -88,10 +89,10 @@ class _ChartCard extends StatelessWidget {
         Navigator.of(context).push(
           PageRouteBuilder(
             opaque: false,
-            transitionDuration: const Duration(milliseconds: 300),
+            transitionDuration: Duration(milliseconds: 300),
             pageBuilder: (_, anim, __) => SlideTransition(
               position: Tween<Offset>(
-                begin: const Offset(0, 1),
+                begin: Offset(0, 1),
                 end: Offset.zero,
               ).animate(CurvedAnimation(parent: anim, curve: Curves.easeOut)),
               child: PlaylistDetailPage(
@@ -109,7 +110,7 @@ class _ChartCard extends StatelessWidget {
           Expanded(
             child: Container(
               decoration: BoxDecoration(
-                borderRadius: const BorderRadius.vertical(
+                borderRadius: BorderRadius.vertical(
                   top: Radius.circular(20),
                 ),
                 gradient: LinearGradient(
@@ -123,8 +124,8 @@ class _ChartCard extends StatelessWidget {
                 children: [
                   Text(
                     chart.name.characters.first,
-                    style: const TextStyle(
-                      color: Colors.white,
+                    style: TextStyle(
+                      color: fgPrimary,
                       fontSize: 44,
                       fontWeight: FontWeight.w800,
                     ),
@@ -135,7 +136,7 @@ class _ChartCard extends StatelessWidget {
                     child: Text(
                       chart.name,
                       style: TextStyle(
-                        color: Colors.white.withOpacity(0.85),
+                        color: fgPrimary.withOpacity(0.85),
                         fontSize: 13,
                         fontWeight: FontWeight.w700,
                       ),
@@ -149,7 +150,7 @@ class _ChartCard extends StatelessWidget {
           Container(
             padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.06),
+              color: fgPrimary.withOpacity(0.06),
               borderRadius: const BorderRadius.vertical(
                 bottom: Radius.circular(20),
               ),
@@ -159,7 +160,7 @@ class _ChartCard extends StatelessWidget {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                color: Colors.white.withOpacity(0.7),
+                color: fgPrimary.withOpacity(0.7),
                 fontSize: 12,
               ),
             ),
@@ -185,3 +186,5 @@ class _ChartCard extends StatelessWidget {
     return palettes[idx];
   }
 }
+
+

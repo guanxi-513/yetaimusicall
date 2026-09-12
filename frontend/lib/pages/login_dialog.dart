@@ -1,4 +1,4 @@
-/// 扫码登录弹窗（三音源）：顶部「网易云 / 酷狗 / QQ」切换，各自独立扫码流程
+﻿/// 扫码登录弹窗（三音源）：顶部「网易云 / 酷狗 / QQ」切换，各自独立扫码流程
 ///
 /// - 网易云：/login/qr + /login/qr/check 轮询 801/802/803/800
 /// - 酷狗：/kugou/login/qr + /kugou/login/qr/check 轮询 status 1/2/4/0，
@@ -13,6 +13,7 @@ import 'dart:typed_data';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import '../state/ui_settings.dart';
 import 'package:provider/provider.dart';
 
 import '../config.dart';
@@ -365,7 +366,7 @@ class _LoginDialogState extends State<LoginDialog> {
         // cookie 已由 ApiService.sodaLoginQrCheck 整串保存，刷新登录态
         await context.read<AuthState>().onSodaLoginSuccess();
         if (mounted) {
-          await Future.delayed(const Duration(milliseconds: 200));
+          await Future.delayed(Duration(milliseconds: 200));
           if (mounted) Navigator.pop(context, true);
         }
         break;
@@ -411,9 +412,9 @@ class _LoginDialogState extends State<LoginDialog> {
   Widget build(BuildContext context) {
     return Dialog(
       backgroundColor: Colors.transparent,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
+      insetPadding: EdgeInsets.symmetric(horizontal: 32, vertical: 24),
       child: GlassCard(
-        padding: const EdgeInsets.fromLTRB(24, 28, 24, 20),
+        padding: EdgeInsets.fromLTRB(24, 28, 24, 20),
         borderRadius: 24,
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -426,62 +427,62 @@ class _LoginDialogState extends State<LoginDialog> {
                   height: 30,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: const Color(0xFFE05A8A).withOpacity(0.22),
+                    color: Color(0xFFE05A8A).withOpacity(0.22),
                     border: Border.all(
-                      color: Colors.white.withOpacity(0.3),
+                      color: fgPrimary.withOpacity(0.3),
                       width: 1,
                     ),
                   ),
-                  child: const Icon(
+                  child: Icon(
                     Icons.music_note,
-                    color: Colors.white,
+                    color: fgPrimary,
                     size: 16,
                   ),
                 ),
-                const SizedBox(width: 10),
-                const Text(
+                SizedBox(width: 10),
+                Text(
                   '扫码登录',
                   style: TextStyle(
-                    color: Colors.white,
+                    color: fgPrimary,
                     fontSize: 17,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 16),
+            SizedBox(height: 16),
             // 音源切换（四入口）
             Row(
               children: [
                 _sourceTab('网易云', 'netease'),
-                const SizedBox(width: 8),
+                SizedBox(width: 8),
                 _sourceTab('酷狗', 'kugou'),
-                const SizedBox(width: 8),
+                SizedBox(width: 8),
                 _sourceTab('QQ', 'qq'),
-                const SizedBox(width: 8),
+                SizedBox(width: 8),
                 _sourceTab('汽水', 'soda'),
               ],
             ),
-            const SizedBox(height: 6),
+            SizedBox(height: 6),
             // 二维码区
             _buildQrArea(),
-            const SizedBox(height: 16),
+            SizedBox(height: 16),
             // 状态文案
             Text(
               _message,
               textAlign: TextAlign.center,
               style: TextStyle(
                 color: _status == _QrStatus.success
-                    ? const Color(0xFF8FE0A0)
+                    ? Color(0xFF8FE0A0)
                     : (_status == _QrStatus.expired ||
                               _status == _QrStatus.error
-                          ? const Color(0xFFE0A05A)
-                          : Colors.white.withOpacity(0.7)),
+                          ? Color(0xFFE0A05A)
+                          : fgPrimary.withOpacity(0.7)),
                 fontSize: 13,
                 height: 1.5,
               ),
             ),
-            const SizedBox(height: 18),
+            SizedBox(height: 18),
             // 操作按钮
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -490,26 +491,26 @@ class _LoginDialogState extends State<LoginDialog> {
                   onPressed: () => Navigator.pop(context, false),
                   child: Text(
                     '取消',
-                    style: TextStyle(color: Colors.white.withOpacity(0.55)),
+                    style: TextStyle(color: fgPrimary.withOpacity(0.55)),
                   ),
                 ),
                 if (_status == _QrStatus.expired || _status == _QrStatus.error)
                   TextButton.icon(
                     onPressed: _fetchQr,
-                    icon: const Icon(
+                    icon: Icon(
                       Icons.refresh,
-                      color: Colors.white,
+                      color: fgPrimary,
                       size: 16,
                     ),
-                    label: const Text(
+                    label: Text(
                       '刷新二维码',
-                      style: TextStyle(color: Colors.white),
+                      style: TextStyle(color: fgPrimary),
                     ),
                     style: TextButton.styleFrom(
-                      backgroundColor: Colors.white.withOpacity(0.14),
+                      backgroundColor: fgPrimary.withOpacity(0.14),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12),
-                        side: BorderSide(color: Colors.white.withOpacity(0.3)),
+                        side: BorderSide(color: fgPrimary.withOpacity(0.3)),
                       ),
                     ),
                   ),
@@ -533,24 +534,24 @@ class _LoginDialogState extends State<LoginDialog> {
             gradient: selected
                 ? LinearGradient(
                     colors: [
-                      Colors.white.withOpacity(0.26),
-                      Colors.white.withOpacity(0.10),
+                      fgPrimary.withOpacity(0.26),
+                      fgPrimary.withOpacity(0.10),
                     ],
                   )
                 : null,
-            color: selected ? null : Colors.white.withOpacity(0.07),
+            color: selected ? null : fgPrimary.withOpacity(0.07),
             borderRadius: BorderRadius.circular(13),
             border: Border.all(
               color: selected
-                  ? Colors.white.withOpacity(0.4)
-                  : Colors.white.withOpacity(0.14),
+                  ? fgPrimary.withOpacity(0.4)
+                  : fgPrimary.withOpacity(0.14),
             ),
           ),
           child: Center(
             child: Text(
               label,
               style: TextStyle(
-                color: selected ? Colors.white : Colors.white.withOpacity(0.55),
+                color: selected ? fgPrimary : fgPrimary.withOpacity(0.55),
                 fontSize: 13,
                 fontWeight: FontWeight.w600,
               ),
@@ -606,7 +607,7 @@ class _LoginDialogState extends State<LoginDialog> {
         height: size,
         child: Center(
           child: CircularProgressIndicator(
-            color: Colors.white.withOpacity(0.7),
+            color: fgPrimary.withOpacity(0.7),
             strokeWidth: 2.5,
           ),
         ),
@@ -620,7 +621,7 @@ class _LoginDialogState extends State<LoginDialog> {
         child: Center(
           child: Icon(
             Icons.broken_image,
-            color: Colors.white.withOpacity(0.4),
+            color: fgPrimary.withOpacity(0.4),
             size: 48,
           ),
         ),
@@ -635,8 +636,8 @@ class _LoginDialogState extends State<LoginDialog> {
           height: size + 18,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
-            color: Colors.white.withOpacity(0.10),
-            border: Border.all(color: Colors.white.withOpacity(0.3), width: 1),
+            color: fgPrimary.withOpacity(0.10),
+            border: Border.all(color: fgPrimary.withOpacity(0.3), width: 1),
             boxShadow: [
               BoxShadow(
                 color: Colors.black.withOpacity(0.3),
@@ -683,16 +684,16 @@ class _LoginDialogState extends State<LoginDialog> {
           height: size,
           child: Center(
             child: CircularProgressIndicator(
-              color: Colors.white.withOpacity(0.5),
+              color: fgPrimary.withOpacity(0.5),
               strokeWidth: 2,
             ),
           ),
         ),
         errorWidget: (_, __, ___) => Container(
-          color: Colors.white.withOpacity(0.10),
+          color: fgPrimary.withOpacity(0.10),
           child: Icon(
             Icons.broken_image,
-            color: Colors.white.withOpacity(0.4),
+            color: fgPrimary.withOpacity(0.4),
             size: 48,
           ),
         ),
@@ -709,3 +710,5 @@ class _LoginDialogState extends State<LoginDialog> {
     );
   }
 }
+
+

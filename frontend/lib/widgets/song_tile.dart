@@ -64,11 +64,11 @@ class SongTile extends StatelessWidget {
     final card = ValueListenableBuilder<bool>(
       valueListenable: songCardBlur,
       builder: (_, blur, __) => GlassCard(
-        margin: const EdgeInsets.only(bottom: 10),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        borderRadius: 18,
+        margin: const EdgeInsets.only(bottom: 5),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        borderRadius: 16,
         blur: blur,
-        color: isCurrent ? Colors.white.withOpacity(0.20) : null,
+        color: isCurrent ? fgPrimary.withOpacity(0.20) : null,
         onTap: () => player.play(song, queue: queue),
         child: Row(
         children: [
@@ -85,19 +85,19 @@ class SongTile extends StatelessWidget {
           ],
           // 圆形小封面
           Container(
-            width: 46,
-            height: 46,
+            width: 40,
+            height: 40,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              border: Border.all(color: Colors.white.withOpacity(0.3), width: 1),
+              border: Border.all(color: fgPrimary.withOpacity(0.3), width: 1),
             ),
             child: ClipOval(
               child: song.cover.isEmpty
                   ? Container(
-                      color: Colors.white.withOpacity(0.10),
+                      color: fgPrimary.withOpacity(0.10),
                       child: Icon(
                         Icons.music_note,
-                        color: Colors.white.withOpacity(0.6),
+                        color: fgPrimary.withOpacity(0.6),
                         size: 20,
                       ),
                     )
@@ -105,13 +105,13 @@ class SongTile extends StatelessWidget {
                       imageUrl: song.cover,
                       fit: BoxFit.cover,
                       placeholder: (_, __) => Container(
-                        color: Colors.white.withOpacity(0.10),
+                        color: fgPrimary.withOpacity(0.10),
                       ),
                       errorWidget: (_, __, ___) => Container(
-                        color: Colors.white.withOpacity(0.10),
+                        color: fgPrimary.withOpacity(0.10),
                         child: Icon(
                           Icons.music_note,
-                          color: Colors.white.withOpacity(0.6),
+                          color: fgPrimary.withOpacity(0.6),
                           size: 20,
                         ),
                       ),
@@ -129,18 +129,18 @@ class SongTile extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                    color: Colors.white,
+                    color: fgPrimary,
                     fontSize: 15,
                     fontWeight: isCurrent ? FontWeight.w700 : FontWeight.w600,
                   ),
                 ),
-                const SizedBox(height: 3),
+                const SizedBox(height: 2),
                 Text(
                   song.artistText,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                    color: Colors.white.withOpacity(0.55),
+                    color: fgPrimary.withOpacity(0.55),
                     fontSize: 12,
                   ),
                 ),
@@ -153,7 +153,7 @@ class SongTile extends StatelessWidget {
             Text(
               song.durationText,
               style: TextStyle(
-                color: Colors.white.withOpacity(0.40),
+                color: fgPrimary.withOpacity(0.40),
                 fontSize: 11,
               ),
             ),
@@ -171,7 +171,7 @@ class SongTile extends StatelessWidget {
             const SizedBox(width: 2),
             Icon(
               Icons.graphic_eq,
-              color: Colors.white.withOpacity(0.8),
+              color: fgPrimary.withOpacity(0.8),
               size: 16,
             ),
           ],
@@ -183,18 +183,31 @@ class SongTile extends StatelessWidget {
     // 按压缩放反馈（不接管点击，点击仍由 GlassCard 内部处理）
     final scaled = TapScale(pressScale: 0.98, child: card);
     if (index == null) return scaled;
-    // stagger 淡入：index 越大延迟越久（只在首次构建时播一次）
-    return TweenAnimationBuilder<double>(
-      tween: Tween(begin: 0.0, end: 1.0),
-      duration: const Duration(milliseconds: 260),
-      curve: Interval(
-        (index! * 0.04).clamp(0.0, 0.6),
-        1.0,
-        curve: Curves.easeOut,
-      ),
-      builder: (context, v, child) =>
-          Opacity(opacity: v, child: Transform.translate(offset: Offset(0, (1 - v) * 8), child: child)),
-      child: scaled,
+    // 列表递进开关：关闭时立即显示，不建任何动画
+    return ValueListenableBuilder<bool>(
+      valueListenable: transitionStagger,
+      builder: (_, stagger, __) {
+        if (!stagger) return scaled;
+        // stagger：从下方 16px 上浮 + 淡入 + 轻微缩放，间隔 40ms。
+        // TweenAnimationBuilder 只在首次构建播一次（滚动新建的项会各自播）
+        return TweenAnimationBuilder<double>(
+          tween: Tween(begin: 0.0, end: 1.0),
+          duration: const Duration(milliseconds: 300),
+          curve: Interval(
+            (index! * 0.04).clamp(0.0, 0.6),
+            1.0,
+            curve: Curves.easeOutCubic,
+          ),
+          builder: (context, v, child) => Opacity(
+            opacity: v,
+            child: Transform.translate(
+              offset: Offset(0, (1 - v) * 16),
+              child: Transform.scale(scale: 0.98 + 0.02 * v, child: child),
+            ),
+          ),
+          child: scaled,
+        );
+      },
     );
   }
 }
@@ -217,7 +230,7 @@ class _RankNumber extends StatelessWidget {
         '$rank',
         textAlign: TextAlign.center,
         style: TextStyle(
-          color: highlight ? Colors.white : Colors.white.withOpacity(0.45),
+          color: highlight ? fgPrimary : fgPrimary.withOpacity(0.45),
           fontSize: 13,
           fontWeight: FontWeight.w600,
         ),
@@ -236,7 +249,7 @@ class _RankNumber extends StatelessWidget {
       fontSize = 17;
       weight = FontWeight.w700;
     } else {
-      color = highlight ? Colors.white : Colors.white.withOpacity(0.45);
+      color = highlight ? fgPrimary : fgPrimary.withOpacity(0.45);
       fontSize = 14;
       weight = FontWeight.w600;
     }
@@ -310,7 +323,7 @@ class _FavoriteButton extends StatelessWidget {
         padding: const EdgeInsets.all(6),
         child: Icon(
           isFav ? Icons.favorite : Icons.favorite_border,
-          color: isFav ? const Color(0xFFE05A8A) : Colors.white.withOpacity(0.5),
+          color: isFav ? Color(0xFFE05A8A) : fgPrimary.withOpacity(0.5),
           size: 20,
         ),
       ),
@@ -320,11 +333,14 @@ class _FavoriteButton extends StatelessWidget {
   static void _toast(BuildContext context, String msg) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(msg, style: const TextStyle(color: Colors.white)),
-        backgroundColor: Colors.black.withOpacity(0.6),
+        content: Text(msg, style: TextStyle(color: fgPrimary)),
+        backgroundColor: isLight
+            ? const Color(0xFFEDECE7)
+            : Colors.black.withOpacity(0.6),
         duration: const Duration(seconds: 2),
         behavior: SnackBarBehavior.floating,
       ),
     );
   }
 }
+

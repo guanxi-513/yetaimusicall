@@ -14,7 +14,6 @@ import 'services/media_notification_bridge.dart';
 import 'state/auth_state.dart';
 import 'state/player_state.dart';
 import 'state/ui_settings.dart';
-import 'widgets/glass_background.dart';
 import 'widgets/mini_player_bar.dart';
 import 'widgets/spotify_background.dart';
 
@@ -95,23 +94,39 @@ class LiquidMusicApp extends StatelessWidget {
         ChangeNotifierProvider.value(value: playerState),
         ChangeNotifierProvider.value(value: authState),
       ],
-      child: MaterialApp(
-        title: '液态音乐',
-        debugShowCheckedModeBanner: false,
-        theme: ThemeData(
-          useMaterial3: true,
-          brightness: Brightness.dark,
-          scaffoldBackgroundColor: Colors.transparent,
-          fontFamilyFallback: const [
-            'PingFang SC', 'HarmonyOS Sans', 'Microsoft YaHei', 'sans-serif'
-          ],
-          colorScheme: const ColorScheme.dark(
-            primary: Colors.white,
-            secondary: Color(0xFFE05A8A),
-            surface: Colors.transparent,
+      child: ListenableBuilder(
+        listenable: uiStyle,
+        builder: (context, _) => MaterialApp(
+          title: '液态音乐',
+          debugShowCheckedModeBanner: false,
+          theme: ThemeData(
+            useMaterial3: true,
+            brightness: isLight ? Brightness.light : Brightness.dark,
+            scaffoldBackgroundColor: Colors.transparent,
+            fontFamilyFallback: const [
+              'PingFang SC', 'HarmonyOS Sans', 'Microsoft YaHei', 'sans-serif'
+            ],
+            colorScheme: isLight
+                ? const ColorScheme.light(
+                    primary: Color(0xFF1A1B1C),
+                    secondary: Color(0xFFE05A8A),
+                    surface: Colors.transparent,
+                  )
+                : const ColorScheme.dark(
+                    primary: Colors.white,
+                    secondary: Color(0xFFE05A8A),
+                    surface: Colors.transparent,
+                  ),
           ),
+          // 状态栏图标颜色：浅色主题用深色，深色主题用浅色
+          builder: (context, child) => AnnotatedRegion<SystemUiOverlayStyle>(
+            value: isLight
+                ? SystemUiOverlayStyle.dark
+                : SystemUiOverlayStyle.light,
+            child: child!,
+          ),
+          home: const _HomeShell(),
         ),
-        home: const _HomeShell(),
       ),
     );
   }
@@ -125,9 +140,19 @@ class _HomeShell extends StatelessWidget {
     return SpotifyBackground(
       child: Scaffold(
         backgroundColor: Colors.transparent,
-        body: const HomePage(),
-        // 底部迷你播放条（有当前曲目时显示）
-        bottomNavigationBar: const MiniPlayerBar(),
+        // 底部迷你播放条改为 Stack 悬浮层：胶囊两侧透出底下列表内容
+        body: Stack(
+          children: [
+            // 列表铺满全屏，悬浮胶囊盖在其上，四周均透出列表内容
+            const Positioned.fill(child: HomePage()),
+            const Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: MiniPlayerBar(),
+            ),
+          ],
+        ),
       ),
     );
   }

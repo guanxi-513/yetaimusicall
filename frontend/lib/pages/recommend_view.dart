@@ -11,6 +11,7 @@ library;
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import '../state/ui_settings.dart';
 import 'package:provider/provider.dart';
 
 import '../config.dart';
@@ -286,10 +287,10 @@ class _RecommendViewState extends State<RecommendView>
   PageRouteBuilder _detailRoute(Widget page) {
     return PageRouteBuilder(
       opaque: false,
-      transitionDuration: const Duration(milliseconds: 300),
+      transitionDuration: Duration(milliseconds: 300),
       pageBuilder: (_, anim, __) => SlideTransition(
         position: Tween<Offset>(
-          begin: const Offset(0, 1),
+          begin: Offset(0, 1),
           end: Offset.zero,
         ).animate(CurvedAnimation(parent: anim, curve: Curves.easeOut)),
         child: page,
@@ -302,7 +303,7 @@ class _RecommendViewState extends State<RecommendView>
   }
 
   void _showLogin(BuildContext context) {
-    showDialog(context: context, builder: (_) => const LoginDialog());
+    showDialog(context: context, builder: (_) => LoginDialog());
   }
 
   @override
@@ -313,8 +314,8 @@ class _RecommendViewState extends State<RecommendView>
     _maybeReloadOnAuthChange();
 
     if (_loading) {
-      return const Center(
-        child: CircularProgressIndicator(color: Colors.white70),
+      return Center(
+        child: CircularProgressIndicator(color: fgSecondary),
       );
     }
     if (_error != null) {
@@ -322,12 +323,12 @@ class _RecommendViewState extends State<RecommendView>
     }
 
     return RefreshIndicator(
-      color: Colors.white,
-      backgroundColor: const Color(0xFF2A2044),
+      color: fgPrimary,
+      backgroundColor: bgElevated,
       onRefresh: _load,
       child: ListView(
         physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(0, 6, 0, 16),
+        padding: const EdgeInsets.fromLTRB(0, 6, 0, 100),
         children: [
           // ---- 第一分区：每日推荐 ----
           _SectionHeader(
@@ -347,7 +348,7 @@ class _RecommendViewState extends State<RecommendView>
             onTap: _playSong,
           ),
 
-          const SizedBox(height: 16),
+          const SizedBox(height: 10),
 
           // ---- 第二分区：雷达歌单（获取成功才显示） ----
           if (_radarLoaded) ...[
@@ -382,7 +383,7 @@ class _RecommendViewState extends State<RecommendView>
 
           // ---- 第四分区：猜你喜欢（酷狗私人FM，未登录不渲染） ----
           if (_kgFmLoaded) ...[
-            const SizedBox(height: 16),
+            SizedBox(height: 10),
             _SectionHeader(
               icon: '💫',
               title: '猜你喜欢',
@@ -398,7 +399,7 @@ class _RecommendViewState extends State<RecommendView>
 
           // ---- 第五分区：QQ 每日推荐（需 QQ 登录，未登录完全不渲染） ----
           if (_qqDailyLoaded) ...[
-            const SizedBox(height: 16),
+            SizedBox(height: 10),
             _SectionHeader(
               icon: '🐧',
               title: 'QQ 每日推荐',
@@ -427,7 +428,7 @@ class _SectionHeader extends StatelessWidget {
   final VoidCallback onPlay;
   final VoidCallback onMore;
 
-  const _SectionHeader({
+  _SectionHeader({
     required this.icon,
     required this.title,
     required this.busy,
@@ -438,7 +439,7 @@ class _SectionHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 10),
+      padding: EdgeInsets.fromLTRB(16, 8, 16, 10),
       child: SizedBox(
         height: 44,
         child: Row(
@@ -448,23 +449,23 @@ class _SectionHeader extends StatelessWidget {
                 '$icon $title',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: Colors.white,
+                style: TextStyle(
+                  color: fgPrimary,
                   fontSize: 16,
                   fontWeight: FontWeight.w700,
                 ),
               ),
             ),
             _PlayButton(busy: busy, onTap: onPlay),
-            const SizedBox(width: 8),
+            SizedBox(width: 8),
             GestureDetector(
               onTap: onMore,
               behavior: HitTestBehavior.opaque,
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+                padding: EdgeInsets.symmetric(horizontal: 4, vertical: 8),
                 child: Icon(
                   Icons.chevron_right,
-                  color: Colors.white.withOpacity(0.6),
+                  color: fgPrimary.withOpacity(0.6),
                   size: 20,
                 ),
               ),
@@ -480,7 +481,7 @@ class _SectionHeader extends StatelessWidget {
 class _PlayButton extends StatefulWidget {
   final bool busy;
   final VoidCallback onTap;
-  const _PlayButton({required this.busy, required this.onTap});
+  _PlayButton({required this.busy, required this.onTap});
 
   @override
   State<_PlayButton> createState() => _PlayButtonState();
@@ -498,27 +499,27 @@ class _PlayButtonState extends State<_PlayButton> {
       onTap: widget.busy ? null : widget.onTap,
       child: AnimatedScale(
         scale: _pressed ? 0.9 : 1.0,
-        duration: const Duration(milliseconds: 120),
+        duration: Duration(milliseconds: 120),
         curve: Curves.easeOut,
         child: Container(
           width: 32,
           height: 32,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
-            color: Colors.white.withOpacity(0.15),
-            border: Border.all(color: Colors.white.withOpacity(0.25)),
+            color: fgPrimary.withOpacity(0.15),
+            border: Border.all(color: fgPrimary.withOpacity(0.25)),
           ),
           child: Center(
             child: widget.busy
-                ? const SizedBox(
+                ? SizedBox(
                     width: 14,
                     height: 14,
                     child: CircularProgressIndicator(
                       strokeWidth: 2,
-                      valueColor: AlwaysStoppedAnimation(Colors.white),
+                      valueColor: AlwaysStoppedAnimation(fgPrimary),
                     ),
                   )
-                : const Icon(Icons.play_arrow, color: Colors.white, size: 20),
+                : Icon(Icons.play_arrow, color: fgPrimary, size: 20),
           ),
         ),
       ),
@@ -578,14 +579,14 @@ class _SongCard extends StatelessWidget {
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(16),
                     border: Border.all(
-                      color: Colors.white.withOpacity(0.25),
+                      color: fgPrimary.withOpacity(0.25),
                       width: 1,
                     ),
                     boxShadow: [
                       BoxShadow(
                         color: Colors.black.withOpacity(0.25),
                         blurRadius: 12,
-                        offset: const Offset(0, 5),
+                        offset: Offset(0, 5),
                       ),
                     ],
                   ),
@@ -593,10 +594,10 @@ class _SongCard extends StatelessWidget {
                     borderRadius: BorderRadius.circular(16),
                     child: song.cover.isEmpty
                         ? Container(
-                            color: Colors.white.withOpacity(0.10),
+                            color: fgPrimary.withOpacity(0.10),
                             child: Icon(
                               Icons.album,
-                              color: Colors.white.withOpacity(0.6),
+                              color: fgPrimary.withOpacity(0.6),
                               size: 32,
                             ),
                           )
@@ -608,13 +609,13 @@ class _SongCard extends StatelessWidget {
                             // 图片 CDN 可能拒绝 Dart 默认 UA（403），统一带浏览器 UA
                             httpHeaders: kImageHttpHeaders,
                             placeholder: (_, __) => Container(
-                              color: Colors.white.withOpacity(0.10),
+                              color: fgPrimary.withOpacity(0.10),
                             ),
                             errorWidget: (_, __, ___) => Container(
-                              color: Colors.white.withOpacity(0.10),
+                              color: fgPrimary.withOpacity(0.10),
                               child: Icon(
                                 Icons.album,
-                                color: Colors.white.withOpacity(0.6),
+                                color: fgPrimary.withOpacity(0.6),
                                 size: 32,
                               ),
                             ),
@@ -633,16 +634,18 @@ class _SongCard extends StatelessWidget {
                       width: 30,
                       height: 30,
                       decoration: BoxDecoration(
-                        color: Colors.black.withOpacity(0.40),
+                        color: isLight
+                            ? fgPrimary.withOpacity(0.10)
+                            : Colors.black.withOpacity(0.40),
                         shape: BoxShape.circle,
                         border: Border.all(
-                          color: Colors.white.withOpacity(0.30),
+                          color: fgPrimary.withOpacity(0.30),
                           width: 1,
                         ),
                       ),
                       child: Icon(
                         isFav ? Icons.favorite : Icons.favorite_border,
-                        color: isFav ? const Color(0xFFFF4D6D) : Colors.white,
+                        color: isFav ? Color(0xFFFF4D6D) : fgPrimary,
                         size: 16,
                       ),
                     ),
@@ -650,7 +653,7 @@ class _SongCard extends StatelessWidget {
                 ),
               ],
             ),
-            const SizedBox(height: 6),
+            SizedBox(height: 6),
             // 歌名
             SizedBox(
               width: double.infinity,
@@ -658,8 +661,8 @@ class _SongCard extends StatelessWidget {
                 song.name,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: Colors.white,
+                style: TextStyle(
+                  color: fgPrimary,
                   fontSize: 13,
                   fontWeight: FontWeight.w600,
                 ),
@@ -673,7 +676,7 @@ class _SongCard extends StatelessWidget {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
-                  color: Colors.white.withOpacity(0.45),
+                  color: fgPrimary.withOpacity(0.45),
                   fontSize: 11,
                 ),
               ),
@@ -688,42 +691,42 @@ class _SongCard extends StatelessWidget {
 /// 未登录提示 banner：登录后查看专属每日推荐
 class _LoginHintBanner extends StatelessWidget {
   final VoidCallback onLogin;
-  const _LoginHintBanner({required this.onLogin});
+  _LoginHintBanner({required this.onLogin});
 
   @override
   Widget build(BuildContext context) {
     return GlassCard(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      padding: EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       borderRadius: 18,
-      color: const Color(0xFF6C4FE0).withOpacity(0.18),
+      color: Color(0xFF6C4FE0).withOpacity(0.18),
       child: Row(
         children: [
-          Icon(Icons.login, color: Colors.white.withOpacity(0.85), size: 20),
-          const SizedBox(width: 10),
+          Icon(Icons.login, color: fgPrimary.withOpacity(0.85), size: 20),
+          SizedBox(width: 10),
           Expanded(
             child: Text(
               '当前为热歌榜，登录后可查看你的专属每日推荐',
               style: TextStyle(
-                color: Colors.white.withOpacity(0.85),
+                color: fgPrimary.withOpacity(0.85),
                 fontSize: 12,
                 height: 1.4,
               ),
             ),
           ),
-          const SizedBox(width: 8),
+          SizedBox(width: 8),
           GestureDetector(
             onTap: onLogin,
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.22),
+                color: fgPrimary.withOpacity(0.22),
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.white.withOpacity(0.4)),
+                border: Border.all(color: fgPrimary.withOpacity(0.4)),
               ),
-              child: const Text(
+              child: Text(
                 '去登录',
                 style: TextStyle(
-                  color: Colors.white,
+                  color: fgPrimary,
                   fontSize: 12,
                   fontWeight: FontWeight.w700,
                 ),
@@ -751,7 +754,7 @@ class _ErrorView extends StatelessWidget {
           children: [
             Icon(
               Icons.cloud_off,
-              color: Colors.white.withOpacity(0.4),
+              color: fgPrimary.withOpacity(0.4),
               size: 48,
             ),
             const SizedBox(height: 16),
@@ -759,7 +762,7 @@ class _ErrorView extends StatelessWidget {
               message,
               textAlign: TextAlign.center,
               style: TextStyle(
-                color: Colors.white.withOpacity(0.6),
+                color: fgPrimary.withOpacity(0.6),
                 fontSize: 13,
                 height: 1.6,
               ),
@@ -767,13 +770,13 @@ class _ErrorView extends StatelessWidget {
             const SizedBox(height: 20),
             TextButton.icon(
               onPressed: onRetry,
-              icon: const Icon(Icons.refresh, color: Colors.white, size: 18),
-              label: const Text('重试', style: TextStyle(color: Colors.white)),
+              icon: Icon(Icons.refresh, color: fgPrimary, size: 18),
+              label: Text('重试', style: TextStyle(color: fgPrimary)),
               style: TextButton.styleFrom(
-                backgroundColor: Colors.white.withOpacity(0.12),
+                backgroundColor: fgPrimary.withOpacity(0.12),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(14),
-                  side: BorderSide(color: Colors.white.withOpacity(0.25)),
+                  side: BorderSide(color: fgPrimary.withOpacity(0.25)),
                 ),
               ),
             ),
@@ -783,3 +786,5 @@ class _ErrorView extends StatelessWidget {
     );
   }
 }
+
+

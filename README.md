@@ -39,7 +39,11 @@ flutter run           # 调试运行
 flutter build apk --release   # 出正式包
 ```
 
-App 启动后在「设置」里填写音源服务地址（如 `http://服务器IP:41831`），即可使用。
+App 启动后默认连接音源服务 `http://82.157.146.105:41831`，也可在「设置」里运行时修改（持久化保存）。
+
+## 更新日志
+
+见 [frontend/CHANGELOG.md](frontend/CHANGELOG.md)。
 
 ## 核心功能
 

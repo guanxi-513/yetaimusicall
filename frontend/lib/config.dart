@@ -1,6 +1,6 @@
-/// 全局配置：API 基础地址等常量
+﻿/// 全局配置：API 基础地址等常量
 ///
-/// - Android 模拟器访问宿主机服务：http://10.0.2.2:41831
+/// - Android 模拟器访问宿主机服务：http://82.157.146.105:41831
 /// - 真机 / 局域网访问：http://<电脑局域网IP>:41831
 /// - 服务器部署：http://<服务器公网IP>:41831
 /// 修改 [kApiBaseUrl] 后热重启即可生效；也可以在设置页运行时修改（见 SettingsDialog）。
@@ -22,7 +22,7 @@ class AppConfig {
   AppConfig._();
 
   /// 默认 API 基础地址（Android 模拟器 → 宿主机）
-  static const String kDefaultApiBaseUrl = 'http://10.0.2.2:41831';
+  static const String kDefaultApiBaseUrl = 'http://82.157.146.105:41831';
 
   /// SharedPreferences 中保存音源地址的 key
   static const String _kApiBaseUrlKey = 'api_base_url';

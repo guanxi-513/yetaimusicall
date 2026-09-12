@@ -4,6 +4,7 @@ library;
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
+import '../state/ui_settings.dart';
 
 class GlassButton extends StatefulWidget {
   final Widget child;
@@ -44,51 +45,75 @@ class _GlassButtonState extends State<GlassButton> {
         scale: _pressed ? 0.92 : 1.0,
         duration: const Duration(milliseconds: 120),
         curve: Curves.easeOut,
-        child: Material(
-          color: Colors.transparent,
-          child: InkResponse(
-            onTap: widget.onTap,
-            radius: widget.size * 0.75,
-            child: Container(
-              width: widget.size,
-              height: widget.size,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.3),
-                    blurRadius: 20,
-                    offset: const Offset(0, 6),
+        child: ListenableBuilder(
+          listenable: uiStyle,
+          builder: (context, _) {
+            final light = isLight;
+            return Material(
+              color: Colors.transparent,
+              child: InkResponse(
+                onTap: widget.onTap,
+                radius: widget.size * 0.75,
+                child: Container(
+                  width: widget.size,
+                  height: widget.size,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(light ? 0.08 : 0.3),
+                        blurRadius: light ? 10 : 20,
+                        offset: const Offset(0, 6),
+                      ),
+                    ],
                   ),
-                ],
-              ),
-              child: ClipOval(
-                child: BackdropFilter(
-                  filter:
-                      ImageFilter.blur(sigmaX: widget.blurSigma, sigmaY: widget.blurSigma),
-                  child: Container(
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      gradient: LinearGradient(
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                        colors: [
-                          (widget.background ?? Colors.white).withOpacity(0.28),
-                          (widget.background ?? Colors.white).withOpacity(0.08),
-                        ],
-                      ),
-                      border: Border.all(
-                        color: Colors.white.withOpacity(0.35),
-                        width: widget.borderWidth,
-                      ),
-                    ),
-                    child: widget.child,
+                  child: ClipOval(
+                    // 极简白色档：无模糊，白底浅边
+                    child: light
+                        ? Container(
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: const Color(0xFFFFFFFF),
+                              border: Border.all(
+                                color: const Color(0xFFE4E3DD),
+                                width: widget.borderWidth,
+                              ),
+                            ),
+                            child: widget.child,
+                          )
+                        : BackdropFilter(
+                            filter: ImageFilter.blur(
+                              sigmaX: widget.blurSigma,
+                              sigmaY: widget.blurSigma,
+                            ),
+                            child: Container(
+                              alignment: Alignment.center,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                gradient: LinearGradient(
+                                  begin: Alignment.topLeft,
+                                  end: Alignment.bottomRight,
+                                  colors: [
+                                    (widget.background ?? fgPrimary)
+                                        .withOpacity(0.28),
+                                    (widget.background ?? fgPrimary)
+                                        .withOpacity(0.08),
+                                  ],
+                                ),
+                                border: Border.all(
+                                  color: fgPrimary.withOpacity(0.35),
+                                  width: widget.borderWidth,
+                                ),
+                              ),
+                              child: widget.child,
+                            ),
+                          ),
                   ),
                 ),
               ),
-            ),
-          ),
+            );
+          },
         ),
       ),
     );
@@ -117,7 +142,9 @@ class GlassIconButton extends StatelessWidget {
     return GlassButton(
       onTap: onTap,
       size: size,
-      child: Icon(icon, size: iconSize, color: color ?? Colors.white),
+      child: Icon(icon, size: iconSize, color: color ?? fgPrimary),
     );
   }
 }
+
+

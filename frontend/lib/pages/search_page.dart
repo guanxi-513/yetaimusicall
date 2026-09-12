@@ -1,10 +1,11 @@
-/// 搜索页：毛玻璃搜索框 + 搜索源切换（网易云 / B站）+ 历史记录 chips + 滚动加载更多
+﻿/// 搜索页：毛玻璃搜索框 + 搜索源切换（网易云 / B站）+ 历史记录 chips + 滚动加载更多
 library;
 
 import 'dart:async';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
+import '../state/ui_settings.dart';
 
 import '../config.dart';
 import '../models/song.dart';
@@ -140,7 +141,7 @@ class _SearchPageState extends State<SearchPage>
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _results = const [];
+        _results = [];
         _searching = false;
         _searched = true;
         _error = '搜索失败：$e';
@@ -210,18 +211,18 @@ class _SearchPageState extends State<SearchPage>
 
   Widget _buildBody() {
     if (_searching) {
-      return const Center(
-        child: CircularProgressIndicator(color: Colors.white70),
+      return Center(
+        child: CircularProgressIndicator(color: fgSecondary),
       );
     }
     if (_error != null) {
       return Center(
         child: Padding(
-          padding: const EdgeInsets.all(32),
+          padding: EdgeInsets.all(32),
           child: Text(
             _error!,
             textAlign: TextAlign.center,
-            style: TextStyle(color: Colors.white.withOpacity(0.55), fontSize: 13),
+            style: TextStyle(color: fgPrimary.withOpacity(0.55), fontSize: 13),
           ),
         ),
       );
@@ -235,11 +236,11 @@ class _SearchPageState extends State<SearchPage>
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.search_off, color: Colors.white.withOpacity(0.30), size: 48),
-            const SizedBox(height: 12),
+            Icon(Icons.search_off, color: fgPrimary.withOpacity(0.30), size: 48),
+            SizedBox(height: 12),
             Text(
               '没有找到相关歌曲',
-              style: TextStyle(color: Colors.white.withOpacity(0.45), fontSize: 13),
+              style: TextStyle(color: fgPrimary.withOpacity(0.45), fontSize: 13),
             ),
           ],
         ),
@@ -247,7 +248,7 @@ class _SearchPageState extends State<SearchPage>
     }
     return ListView.builder(
       controller: _scrollCtrl,
-      padding: const EdgeInsets.fromLTRB(16, 6, 16, 16),
+      padding: EdgeInsets.fromLTRB(16, 6, 16, 16),
       itemCount: _results.length + 1,
       itemBuilder: (context, i) {
         if (i == _results.length) {
@@ -260,14 +261,14 @@ class _SearchPageState extends State<SearchPage>
 
   Widget _buildListFooter() {
     if (_loadingMore) {
-      return const Padding(
+      return Padding(
         padding: EdgeInsets.symmetric(vertical: 16),
         child: Center(
           child: SizedBox(
             width: 22,
             height: 22,
             child: CircularProgressIndicator(
-                color: Colors.white70, strokeWidth: 2),
+                color: fgSecondary, strokeWidth: 2),
           ),
         ),
       );
@@ -280,7 +281,7 @@ class _SearchPageState extends State<SearchPage>
       child: Center(
         child: Text(
           '没有更多了',
-          style: TextStyle(color: Colors.white.withOpacity(0.35), fontSize: 12),
+          style: TextStyle(color: fgPrimary.withOpacity(0.35), fontSize: 12),
         ),
       ),
     );
@@ -297,12 +298,12 @@ class _SearchPageState extends State<SearchPage>
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.search, color: Colors.white.withOpacity(0.30), size: 52),
+            Icon(Icons.search, color: fgPrimary.withOpacity(0.30), size: 52),
             const SizedBox(height: 12),
             Text(
               '搜索歌曲、歌手、专辑',
               style: TextStyle(
-                color: Colors.white.withOpacity(0.35),
+                color: fgPrimary.withOpacity(0.35),
                 fontSize: 13,
               ),
             ),
@@ -320,7 +321,7 @@ class _SearchPageState extends State<SearchPage>
             Text(
               '搜索历史',
               style: TextStyle(
-                color: Colors.white.withOpacity(0.6),
+                color: fgPrimary.withOpacity(0.6),
                 fontSize: 13,
                 fontWeight: FontWeight.w600,
               ),
@@ -353,20 +354,20 @@ class _SearchPageState extends State<SearchPage>
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.08),
+                color: fgPrimary.withOpacity(0.08),
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.white.withOpacity(0.18)),
+                border: Border.all(color: fgPrimary.withOpacity(0.18)),
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Icon(Icons.delete_sweep,
-                      color: Colors.white.withOpacity(0.6), size: 14),
+                      color: fgPrimary.withOpacity(0.6), size: 14),
                   const SizedBox(width: 4),
                   Text(
                     '清空历史',
                     style: TextStyle(
-                      color: Colors.white.withOpacity(0.6),
+                      color: fgPrimary.withOpacity(0.6),
                       fontSize: 12,
                     ),
                   ),
@@ -411,11 +412,11 @@ class _SourceSwitcher extends StatelessWidget {
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
                 colors: [
-                  Colors.white.withOpacity(0.14),
-                  Colors.white.withOpacity(0.05),
+                  fgPrimary.withOpacity(0.14),
+                  fgPrimary.withOpacity(0.05),
                 ],
               ),
-              border: Border.all(color: Colors.white.withOpacity(0.22), width: 1),
+              border: Border.all(color: fgPrimary.withOpacity(0.22), width: 1),
               borderRadius: BorderRadius.circular(14),
             ),
             child: Row(
@@ -439,17 +440,17 @@ class _SourceSwitcher extends StatelessWidget {
         child: Container(
           margin: const EdgeInsets.all(3),
           decoration: BoxDecoration(
-            color: active ? Colors.white.withOpacity(0.25) : Colors.transparent,
+            color: active ? fgPrimary.withOpacity(0.25) : Colors.transparent,
             borderRadius: BorderRadius.circular(11),
             border: active
-                ? Border.all(color: Colors.white.withOpacity(0.35), width: 1)
+                ? Border.all(color: fgPrimary.withOpacity(0.35), width: 1)
                 : null,
           ),
           alignment: Alignment.center,
           child: Text(
             label,
             style: TextStyle(
-              color: active ? Colors.white : Colors.white.withOpacity(0.50),
+              color: active ? fgPrimary : fgPrimary.withOpacity(0.50),
               fontSize: 13,
               fontWeight: active ? FontWeight.w700 : FontWeight.w500,
             ),
@@ -486,13 +487,13 @@ class _HistoryChip extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               Icon(Icons.history,
-                  color: Colors.white.withOpacity(0.45), size: 14),
+                  color: fgPrimary.withOpacity(0.45), size: 14),
               const SizedBox(width: 6),
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 8),
                 child: Text(
                   keyword,
-                  style: const TextStyle(color: Colors.white, fontSize: 13),
+                  style: TextStyle(color: fgPrimary, fontSize: 13),
                 ),
               ),
               const SizedBox(width: 4),
@@ -502,7 +503,7 @@ class _HistoryChip extends StatelessWidget {
                 child: Padding(
                   padding: const EdgeInsets.all(4),
                   child: Icon(Icons.close,
-                      color: Colors.white.withOpacity(0.5), size: 14),
+                      color: fgPrimary.withOpacity(0.5), size: 14),
                 ),
               ),
               const SizedBox(width: 8),
@@ -555,16 +556,16 @@ class _GlassSearchField extends StatelessWidget {
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
                 colors: [
-                  Colors.white.withOpacity(0.16),
-                  Colors.white.withOpacity(0.06),
+                  fgPrimary.withOpacity(0.16),
+                  fgPrimary.withOpacity(0.06),
                 ],
               ),
-              border: Border.all(color: Colors.white.withOpacity(0.25), width: 1),
+              border: Border.all(color: fgPrimary.withOpacity(0.25), width: 1),
               borderRadius: BorderRadius.circular(18),
             ),
             child: Row(
               children: [
-                Icon(Icons.search, color: Colors.white.withOpacity(0.6), size: 20),
+                Icon(Icons.search, color: fgPrimary.withOpacity(0.6), size: 20),
                 const SizedBox(width: 10),
                 Expanded(
                   child: TextField(
@@ -572,14 +573,14 @@ class _GlassSearchField extends StatelessWidget {
                     onChanged: onChanged,
                     onSubmitted: onSubmitted,
                     textInputAction: TextInputAction.search,
-                    style: const TextStyle(color: Colors.white, fontSize: 14),
-                    cursorColor: Colors.white70,
+                    style: TextStyle(color: fgPrimary, fontSize: 14),
+                    cursorColor: fgSecondary,
                     decoration: InputDecoration(
                       isCollapsed: true,
                       border: InputBorder.none,
                       hintText: hint,
                       hintStyle:
-                          TextStyle(color: Colors.white.withOpacity(0.35)),
+                          TextStyle(color: fgPrimary.withOpacity(0.35)),
                     ),
                   ),
                 ),
@@ -590,7 +591,7 @@ class _GlassSearchField extends StatelessWidget {
                       onChanged('');
                     },
                     child: Icon(Icons.close,
-                        color: Colors.white.withOpacity(0.5), size: 18),
+                        color: fgPrimary.withOpacity(0.5), size: 18),
                   ),
               ],
             ),
@@ -600,3 +601,5 @@ class _GlassSearchField extends StatelessWidget {
     );
   }
 }
+
+

@@ -1,9 +1,13 @@
-/// 通用玻璃卡片组件：BackdropFilter 毛玻璃 + 半透明白 + 高光描边
+﻿/// 通用玻璃卡片组件：BackdropFilter 毛玻璃 + 半透明白 + 高光描边
+/// 极简暗色档：扁平实色卡片（无模糊、小圆角）
+/// 极简白色档：白底浅边卡片（无模糊）
 library;
 
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
+
+import '../state/ui_settings.dart';
 
 class GlassCard extends StatelessWidget {
   final Widget child;
@@ -33,56 +37,78 @@ class GlassCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final inner = Container(
-      padding: padding,
-      decoration: BoxDecoration(
-        // 有自定义底色用底色，否则用左上→右下的微渐变（液态玻璃光泽）
-        color: color,
-        gradient: color == null
-            ? LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  Colors.white.withOpacity(0.18),
-                  Colors.white.withOpacity(0.06),
-                ],
-              )
-            : null,
-        borderRadius: BorderRadius.circular(borderRadius),
-        border: Border.all(
-          color: Colors.white.withOpacity(0.25),
-          width: borderWidth,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.25),
-            blurRadius: 24,
-            offset: const Offset(0, 8),
+    return ListenableBuilder(
+      listenable: uiStyle,
+      builder: (context, _) {
+        final plain = uiStyle.value == UiStyle.plain;
+        final light = isLight;
+        final radius = plain ? 12.0 : borderRadius;
+        final inner = Container(
+          padding: padding,
+          decoration: BoxDecoration(
+            color: light ? bgCard : (plain ? Color(0xFF1A1C20) : color),
+            gradient: !plain && !light && color == null
+                ? LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      fgPrimary.withOpacity(0.18),
+                      fgPrimary.withOpacity(0.06),
+                    ],
+                  )
+                : null,
+            borderRadius: BorderRadius.circular(radius),
+            border: Border.all(
+              color: light
+                  ? const Color(0xFFE4E3DD)
+                  : plain
+                      ? fgPrimary.withOpacity(0.08)
+                      : fgPrimary.withOpacity(0.25),
+              width: light || plain ? 1 : borderWidth,
+            ),
+            boxShadow: light || plain
+                ? [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.05),
+                      blurRadius: 10,
+                      offset: const Offset(0, 2),
+                    ),
+                  ]
+                : [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.25),
+                      blurRadius: 24,
+                      offset: const Offset(0, 8),
+                    ),
+                  ],
           ),
-        ],
-      ),
-      child: child,
-    );
-    final body = Container(
-      margin: margin,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(borderRadius),
-        child: blur
-            ? BackdropFilter(
-                filter: ImageFilter.blur(sigmaX: blurSigma, sigmaY: blurSigma),
-                child: inner,
-              )
-            : inner,
-      ),
-    );
-    if (onTap == null) return body;
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(borderRadius),
-        child: body,
-      ),
+          child: child,
+        );
+        final body = Container(
+          margin: margin,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(radius),
+            child: (blur && !plain && !light)
+                ? BackdropFilter(
+                    filter: ImageFilter.blur(
+                      sigmaX: blurSigma,
+                      sigmaY: blurSigma,
+                    ),
+                    child: inner,
+                  )
+                : inner,
+          ),
+        );
+        if (onTap == null) return body;
+        return Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(radius),
+            child: body,
+          ),
+        );
+      },
     );
   }
 }

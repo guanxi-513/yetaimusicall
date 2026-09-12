@@ -3,6 +3,7 @@ library;
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import '../state/ui_settings.dart';
 import 'package:provider/provider.dart';
 
 import '../config.dart';
@@ -16,6 +17,75 @@ import '../widgets/glass_card.dart';
 import '../widgets/song_tile.dart';
 import 'login_dialog.dart';
 import 'playlist_detail_page.dart';
+
+/// 统一的歌单详情页路由：
+/// transitionPage 开 → 整页淡入 + 轻微上滑(3.5%) + 缩放(0.97→1)，400ms，
+///   详情页背景（BackdropFilter）随整页 opacity 一起渐显；
+/// 关 → 保持原有底部上滑透明路由。
+void pushPlaylistDetail(
+  BuildContext context, {
+  String? id,
+  String? title,
+  String? cover,
+  String source = 'netease',
+  List<Song>? initialSongs,
+  Future<List<Song>> Function()? onRefresh,
+  Future<List<Song>> Function()? onRefetch,
+  String? heroTag,
+}) {
+  final page = PlaylistDetailPage(
+    id: id,
+    title: title,
+    cover: cover,
+    source: source,
+    initialSongs: initialSongs,
+    onRefresh: onRefresh,
+    onRefetch: onRefetch,
+    heroTag: heroTag,
+  );
+  if (transitionPage.value) {
+    Navigator.of(context).push(
+      PageRouteBuilder(
+        opaque: false,
+        transitionDuration: const Duration(milliseconds: 400),
+        reverseTransitionDuration: const Duration(milliseconds: 300),
+        pageBuilder: (_, anim, __) {
+          final curved = CurvedAnimation(
+            parent: anim,
+            curve: Curves.easeOutCubic,
+          );
+          return FadeTransition(
+            opacity: curved,
+            child: SlideTransition(
+              position: Tween<Offset>(
+                begin: const Offset(0, 0.035),
+                end: Offset.zero,
+              ).animate(curved),
+              child: ScaleTransition(
+                scale: Tween<double>(begin: 0.97, end: 1.0).animate(curved),
+                child: page,
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  } else {
+    Navigator.of(context).push(
+      PageRouteBuilder(
+        opaque: false,
+        transitionDuration: const Duration(milliseconds: 300),
+        pageBuilder: (_, anim, __) => SlideTransition(
+          position: Tween<Offset>(
+            begin: const Offset(0, 1),
+            end: Offset.zero,
+          ).animate(CurvedAnimation(parent: anim, curve: Curves.easeOut)),
+          child: page,
+        ),
+      ),
+    );
+  }
+}
 
 class PlaylistsPage extends StatefulWidget {
   /// 是否为当前可见 tab（IndexedStack 常驻，切回时强制刷新一次）
@@ -351,41 +421,41 @@ class _PlaylistsPageState extends State<PlaylistsPage>
     final sections = [...topSections, ...bottomSections];
 
     return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
+      padding: EdgeInsets.fromLTRB(16, 10, 16, 16),
       children: [
         // 已登录音源分类在上，未登录（登录提示卡片）在下
         for (var i = 0; i < sections.length; i++) ...[
-          if (i > 0) const SizedBox(height: 16),
+          if (i > 0) SizedBox(height: 16),
           sections[i],
         ],
-        const SizedBox(height: 16),
+        SizedBox(height: 16),
         // 收藏 / 历史 分段
         Row(
           children: [
             _seg('❤️ 我的收藏', 0, _favorites.length),
-            const SizedBox(width: 10),
+            SizedBox(width: 10),
             _seg('🕘 播放历史', 1, _history.length),
           ],
         ),
-        const SizedBox(height: 6),
+        SizedBox(height: 6),
         if (songs.isEmpty)
           Padding(
-            padding: const EdgeInsets.symmetric(vertical: 40),
+            padding: EdgeInsets.symmetric(vertical: 40),
             child: Center(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Icon(
                     _tab == 0 ? Icons.favorite_border : Icons.history,
-                    color: Colors.white.withOpacity(0.28),
+                    color: fgPrimary.withOpacity(0.28),
                     size: 48,
                   ),
-                  const SizedBox(height: 12),
+                  SizedBox(height: 12),
                   Text(
                     _tab == 0 ? '还没有收藏歌曲\n点击列表右侧 ♥ 添加收藏' : '暂无播放历史\n去听几首歌吧',
                     textAlign: TextAlign.center,
                     style: TextStyle(
-                      color: Colors.white.withOpacity(0.35),
+                      color: fgPrimary.withOpacity(0.35),
                       fontSize: 13,
                       height: 1.7,
                     ),
@@ -412,14 +482,14 @@ class _PlaylistsPageState extends State<PlaylistsPage>
   Widget _buildCloudSection() {
     final auth = context.read<AuthState>();
     if (auth.checking) {
-      return const Padding(
+      return Padding(
         padding: EdgeInsets.symmetric(vertical: 20),
         child: Center(
           child: SizedBox(
             width: 22,
             height: 22,
             child: CircularProgressIndicator(
-              color: Colors.white70,
+              color: fgSecondary,
               strokeWidth: 2,
             ),
           ),
@@ -428,47 +498,42 @@ class _PlaylistsPageState extends State<PlaylistsPage>
     }
     if (!auth.loggedIn) {
       return GlassCard(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+        padding: EdgeInsets.symmetric(horizontal: 14, vertical: 14),
         borderRadius: 18,
-        color: const Color(0xFF6C4FE0).withOpacity(0.14),
+        color: Color(0xFF6C4FE0).withOpacity(0.14),
         child: Row(
           children: [
             Icon(
               Icons.cloud_download,
-              color: Colors.white.withOpacity(0.7),
+              color: fgPrimary.withOpacity(0.7),
               size: 22,
             ),
-            const SizedBox(width: 10),
+            SizedBox(width: 10),
             Expanded(
               child: Text(
                 '登录网易云音乐后可导入你的歌单',
                 style: TextStyle(
-                  color: Colors.white.withOpacity(0.7),
+                  color: fgPrimary.withOpacity(0.7),
                   fontSize: 12,
                   height: 1.4,
                 ),
               ),
             ),
-            const SizedBox(width: 8),
+            SizedBox(width: 8),
             GestureDetector(
-              onTap: () => showDialog(
-                context: context,
-                builder: (_) => const LoginDialog(),
-              ),
+              onTap: () =>
+                  showDialog(context: context, builder: (_) => LoginDialog()),
               child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 6,
-                ),
+                padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                 decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.22),
+                  color: fgPrimary.withOpacity(0.22),
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.white.withOpacity(0.4)),
+                  border: Border.all(color: fgPrimary.withOpacity(0.4)),
                 ),
-                child: const Text(
+                child: Text(
                   '去登录',
                   style: TextStyle(
-                    color: Colors.white,
+                    color: fgPrimary,
                     fontSize: 12,
                     fontWeight: FontWeight.w700,
                   ),
@@ -486,25 +551,25 @@ class _PlaylistsPageState extends State<PlaylistsPage>
           children: [
             Icon(
               Icons.library_music,
-              color: Colors.white.withOpacity(0.75),
+              color: fgPrimary.withOpacity(0.75),
               size: 18,
             ),
-            const SizedBox(width: 6),
+            SizedBox(width: 6),
             Text(
               '我的网易云歌单',
               style: TextStyle(
-                color: Colors.white.withOpacity(0.8),
+                color: fgPrimary.withOpacity(0.8),
                 fontSize: 14,
                 fontWeight: FontWeight.w700,
               ),
             ),
-            const Spacer(),
+            Spacer(),
             if (_cloudLoading)
-              const SizedBox(
+              SizedBox(
                 width: 16,
                 height: 16,
                 child: CircularProgressIndicator(
-                  color: Colors.white70,
+                  color: fgSecondary,
                   strokeWidth: 2,
                 ),
               )
@@ -513,7 +578,7 @@ class _PlaylistsPageState extends State<PlaylistsPage>
                 onTap: _loadCloudPlaylists,
                 child: Icon(
                   Icons.refresh,
-                  color: Colors.white.withOpacity(0.6),
+                  color: fgPrimary.withOpacity(0.6),
                   size: 18,
                 ),
               ),
@@ -523,18 +588,12 @@ class _PlaylistsPageState extends State<PlaylistsPage>
         if (_cloudError != null)
           Text(
             _cloudError!,
-            style: TextStyle(
-              color: Colors.white.withOpacity(0.5),
-              fontSize: 12,
-            ),
+            style: TextStyle(color: fgPrimary.withOpacity(0.5), fontSize: 12),
           )
         else if (_cloudPlaylists.isEmpty && !_cloudLoading)
           Text(
             '暂无歌单',
-            style: TextStyle(
-              color: Colors.white.withOpacity(0.4),
-              fontSize: 12,
-            ),
+            style: TextStyle(color: fgPrimary.withOpacity(0.4), fontSize: 12),
           )
         else
           SizedBox(
@@ -542,7 +601,7 @@ class _PlaylistsPageState extends State<PlaylistsPage>
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
               itemCount: _cloudPlaylists.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 12),
+              separatorBuilder: (_, __) => SizedBox(width: 12),
               itemBuilder: (context, i) =>
                   _PlaylistCard(playlist: _cloudPlaylists[i]),
             ),
@@ -556,52 +615,49 @@ class _PlaylistsPageState extends State<PlaylistsPage>
   Widget _buildKugouSection() {
     final auth = context.read<AuthState>();
     if (auth.kugouChecking) {
-      return const SizedBox.shrink(); // 检查中不占位，避免闪烁
+      return SizedBox.shrink(); // 检查中不占位，避免闪烁
     }
     if (!auth.kugouLoggedIn) {
       // 未登录：显示「登录酷狗音乐同步歌单」按钮
       return GlassCard(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+        padding: EdgeInsets.symmetric(horizontal: 14, vertical: 14),
         borderRadius: 18,
-        color: const Color(0xFF4FA0E0).withOpacity(0.14),
+        color: Color(0xFF4FA0E0).withOpacity(0.14),
         child: Row(
           children: [
             Icon(
               Icons.library_music,
-              color: Colors.white.withOpacity(0.7),
+              color: fgPrimary.withOpacity(0.7),
               size: 22,
             ),
-            const SizedBox(width: 10),
+            SizedBox(width: 10),
             Expanded(
               child: Text(
                 '登录酷狗音乐后可同步你的歌单',
                 style: TextStyle(
-                  color: Colors.white.withOpacity(0.7),
+                  color: fgPrimary.withOpacity(0.7),
                   fontSize: 12,
                   height: 1.4,
                 ),
               ),
             ),
-            const SizedBox(width: 8),
+            SizedBox(width: 8),
             GestureDetector(
               onTap: () => showDialog(
                 context: context,
-                builder: (_) => const LoginDialog(source: 'kugou'),
+                builder: (_) => LoginDialog(source: 'kugou'),
               ),
               child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 6,
-                ),
+                padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                 decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.22),
+                  color: fgPrimary.withOpacity(0.22),
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.white.withOpacity(0.4)),
+                  border: Border.all(color: fgPrimary.withOpacity(0.4)),
                 ),
-                child: const Text(
+                child: Text(
                   '去登录',
                   style: TextStyle(
-                    color: Colors.white,
+                    color: fgPrimary,
                     fontSize: 12,
                     fontWeight: FontWeight.w700,
                   ),
@@ -619,43 +675,43 @@ class _PlaylistsPageState extends State<PlaylistsPage>
           children: [
             Icon(
               Icons.graphic_eq,
-              color: Colors.white.withOpacity(0.75),
+              color: fgPrimary.withOpacity(0.75),
               size: 18,
             ),
-            const SizedBox(width: 6),
+            SizedBox(width: 6),
             Text(
               '我的酷狗歌单',
               style: TextStyle(
-                color: Colors.white.withOpacity(0.8),
+                color: fgPrimary.withOpacity(0.8),
                 fontSize: 14,
                 fontWeight: FontWeight.w700,
               ),
             ),
-            const SizedBox(width: 8),
+            SizedBox(width: 8),
             // 酷狗来源徽标
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.14),
+                color: fgPrimary.withOpacity(0.14),
                 borderRadius: BorderRadius.circular(6),
-                border: Border.all(color: Colors.white.withOpacity(0.25)),
+                border: Border.all(color: fgPrimary.withOpacity(0.25)),
               ),
               child: Text(
                 '酷狗',
                 style: TextStyle(
-                  color: Colors.white.withOpacity(0.75),
+                  color: fgPrimary.withOpacity(0.75),
                   fontSize: 10,
                   fontWeight: FontWeight.w600,
                 ),
               ),
             ),
-            const Spacer(),
+            Spacer(),
             if (_kgLoading)
-              const SizedBox(
+              SizedBox(
                 width: 16,
                 height: 16,
                 child: CircularProgressIndicator(
-                  color: Colors.white70,
+                  color: fgSecondary,
                   strokeWidth: 2,
                 ),
               )
@@ -664,7 +720,7 @@ class _PlaylistsPageState extends State<PlaylistsPage>
                 onTap: _loadKugouPlaylists,
                 child: Icon(
                   Icons.refresh,
-                  color: Colors.white.withOpacity(0.6),
+                  color: fgPrimary.withOpacity(0.6),
                   size: 18,
                 ),
               ),
@@ -674,18 +730,12 @@ class _PlaylistsPageState extends State<PlaylistsPage>
         if (_kgError != null)
           Text(
             _kgError!,
-            style: TextStyle(
-              color: Colors.white.withOpacity(0.5),
-              fontSize: 12,
-            ),
+            style: TextStyle(color: fgPrimary.withOpacity(0.5), fontSize: 12),
           )
         else if (_kgPlaylists.isEmpty && !_kgLoading)
           Text(
             '暂无歌单',
-            style: TextStyle(
-              color: Colors.white.withOpacity(0.4),
-              fontSize: 12,
-            ),
+            style: TextStyle(color: fgPrimary.withOpacity(0.4), fontSize: 12),
           )
         else
           SizedBox(
@@ -693,7 +743,7 @@ class _PlaylistsPageState extends State<PlaylistsPage>
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
               itemCount: _kgPlaylists.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 12),
+              separatorBuilder: (_, __) => SizedBox(width: 12),
               itemBuilder: (context, i) =>
                   _PlaylistCard(playlist: _kgPlaylists[i]),
             ),
@@ -707,52 +757,45 @@ class _PlaylistsPageState extends State<PlaylistsPage>
   Widget _buildQQSection() {
     final auth = context.read<AuthState>();
     if (auth.qqChecking) {
-      return const SizedBox.shrink(); // 检查中不占位，避免闪烁
+      return SizedBox.shrink(); // 检查中不占位，避免闪烁
     }
     if (!auth.qqLoggedIn) {
       // 未登录：显示「登录 QQ 音乐同步歌单」按钮
       return GlassCard(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+        padding: EdgeInsets.symmetric(horizontal: 14, vertical: 14),
         borderRadius: 18,
-        color: const Color(0xFF12B7F5).withOpacity(0.14),
+        color: Color(0xFF12B7F5).withOpacity(0.14),
         child: Row(
           children: [
-            Icon(
-              Icons.music_note,
-              color: Colors.white.withOpacity(0.7),
-              size: 22,
-            ),
-            const SizedBox(width: 10),
+            Icon(Icons.music_note, color: fgPrimary.withOpacity(0.7), size: 22),
+            SizedBox(width: 10),
             Expanded(
               child: Text(
                 '登录 QQ 音乐后可同步你的歌单',
                 style: TextStyle(
-                  color: Colors.white.withOpacity(0.7),
+                  color: fgPrimary.withOpacity(0.7),
                   fontSize: 12,
                   height: 1.4,
                 ),
               ),
             ),
-            const SizedBox(width: 8),
+            SizedBox(width: 8),
             GestureDetector(
               onTap: () => showDialog(
                 context: context,
-                builder: (_) => const LoginDialog(source: 'qq'),
+                builder: (_) => LoginDialog(source: 'qq'),
               ),
               child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 6,
-                ),
+                padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                 decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.22),
+                  color: fgPrimary.withOpacity(0.22),
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.white.withOpacity(0.4)),
+                  border: Border.all(color: fgPrimary.withOpacity(0.4)),
                 ),
-                child: const Text(
+                child: Text(
                   '去登录',
                   style: TextStyle(
-                    color: Colors.white,
+                    color: fgPrimary,
                     fontSize: 12,
                     fontWeight: FontWeight.w700,
                   ),
@@ -770,43 +813,43 @@ class _PlaylistsPageState extends State<PlaylistsPage>
           children: [
             Icon(
               Icons.queue_music,
-              color: Colors.white.withOpacity(0.75),
+              color: fgPrimary.withOpacity(0.75),
               size: 18,
             ),
-            const SizedBox(width: 6),
+            SizedBox(width: 6),
             Text(
               '我的 QQ 音乐歌单',
               style: TextStyle(
-                color: Colors.white.withOpacity(0.8),
+                color: fgPrimary.withOpacity(0.8),
                 fontSize: 14,
                 fontWeight: FontWeight.w700,
               ),
             ),
-            const SizedBox(width: 8),
+            SizedBox(width: 8),
             // QQ 来源徽标
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.14),
+                color: fgPrimary.withOpacity(0.14),
                 borderRadius: BorderRadius.circular(6),
-                border: Border.all(color: Colors.white.withOpacity(0.25)),
+                border: Border.all(color: fgPrimary.withOpacity(0.25)),
               ),
               child: Text(
                 'QQ',
                 style: TextStyle(
-                  color: Colors.white.withOpacity(0.75),
+                  color: fgPrimary.withOpacity(0.75),
                   fontSize: 10,
                   fontWeight: FontWeight.w600,
                 ),
               ),
             ),
-            const Spacer(),
+            Spacer(),
             if (_qqLoading)
-              const SizedBox(
+              SizedBox(
                 width: 16,
                 height: 16,
                 child: CircularProgressIndicator(
-                  color: Colors.white70,
+                  color: fgSecondary,
                   strokeWidth: 2,
                 ),
               )
@@ -815,78 +858,64 @@ class _PlaylistsPageState extends State<PlaylistsPage>
                 onTap: _loadQQPlaylists,
                 child: Icon(
                   Icons.refresh,
-                  color: Colors.white.withOpacity(0.6),
+                  color: fgPrimary.withOpacity(0.6),
                   size: 18,
                 ),
               ),
           ],
         ),
-        const SizedBox(height: 10),
+        SizedBox(height: 10),
         // QQ「我喜欢」收藏入口（红心图标 + 歌曲数，点击进收藏歌单）
         GestureDetector(
           onTap: () {
             if (_qqLikedSongs.isEmpty && !_qqLikedLoading) return;
-            // 透明路由（与歌单卡片一致），刷新 = 重新拉后端
-            Navigator.of(context).push(
-              PageRouteBuilder(
-                opaque: false,
-                transitionDuration: const Duration(milliseconds: 300),
-                pageBuilder: (_, anim, __) => SlideTransition(
-                  position:
-                      Tween<Offset>(
-                        begin: const Offset(0, 1),
-                        end: Offset.zero,
-                      ).animate(
-                        CurvedAnimation(parent: anim, curve: Curves.easeOut),
-                      ),
-                  child: PlaylistDetailPage(
-                    title: 'QQ 我喜欢',
-                    cover: _qqLikedCover,
-                    initialSongs: _qqLikedSongs,
-                    onRefresh: () async {
-                      final d = await ApiService.qqLikePlaylist();
-                      return d.songs;
-                    },
-                  ),
-                ),
-              ),
+            // 统一详情路由（推入转场受 transitionPage 开关控制），刷新 = 重新拉后端
+            pushPlaylistDetail(
+              context,
+              title: 'QQ 我喜欢',
+              cover: _qqLikedCover,
+              initialSongs: _qqLikedSongs,
+              onRefresh: () async {
+                final d = await ApiService.qqLikePlaylist();
+                return d.songs;
+              },
             );
           },
           child: Container(
-            margin: const EdgeInsets.only(bottom: 10),
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            margin: EdgeInsets.only(bottom: 10),
+            padding: EdgeInsets.symmetric(horizontal: 14, vertical: 12),
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 colors: [
-                  const Color(0xFFFF4D6D).withOpacity(0.22),
-                  const Color(0xFF12B7F5).withOpacity(0.10),
+                  Color(0xFFFF4D6D).withOpacity(0.22),
+                  Color(0xFF12B7F5).withOpacity(0.10),
                 ],
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),
               borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: Colors.white.withOpacity(0.18)),
+              border: Border.all(color: fgPrimary.withOpacity(0.18)),
             ),
             child: Row(
               children: [
-                const Icon(Icons.favorite, color: Color(0xFFFF4D6D), size: 22),
-                const SizedBox(width: 10),
+                Icon(Icons.favorite, color: Color(0xFFFF4D6D), size: 22),
+                SizedBox(width: 10),
                 Expanded(
                   child: Text(
                     'QQ 我喜欢',
                     style: TextStyle(
-                      color: Colors.white.withOpacity(0.92),
+                      color: fgPrimary.withOpacity(0.92),
                       fontSize: 14,
                       fontWeight: FontWeight.w700,
                     ),
                   ),
                 ),
                 if (_qqLikedLoading)
-                  const SizedBox(
+                  SizedBox(
                     width: 14,
                     height: 14,
                     child: CircularProgressIndicator(
-                      color: Colors.white54,
+                      color: fgSecondary,
                       strokeWidth: 2,
                     ),
                   )
@@ -894,14 +923,14 @@ class _PlaylistsPageState extends State<PlaylistsPage>
                   Text(
                     '${_qqLikedSongs.length} 首',
                     style: TextStyle(
-                      color: Colors.white.withOpacity(0.55),
+                      color: fgPrimary.withOpacity(0.55),
                       fontSize: 12,
                     ),
                   ),
                 const SizedBox(width: 4),
                 Icon(
                   Icons.chevron_right,
-                  color: Colors.white.withOpacity(0.5),
+                  color: fgPrimary.withOpacity(0.5),
                   size: 20,
                 ),
               ],
@@ -911,18 +940,12 @@ class _PlaylistsPageState extends State<PlaylistsPage>
         if (_qqError != null)
           Text(
             _qqError!,
-            style: TextStyle(
-              color: Colors.white.withOpacity(0.5),
-              fontSize: 12,
-            ),
+            style: TextStyle(color: fgPrimary.withOpacity(0.5), fontSize: 12),
           )
         else if (_qqPlaylists.isEmpty && !_qqLoading)
           Text(
             '暂无歌单',
-            style: TextStyle(
-              color: Colors.white.withOpacity(0.4),
-              fontSize: 12,
-            ),
+            style: TextStyle(color: fgPrimary.withOpacity(0.4), fontSize: 12),
           )
         else
           SizedBox(
@@ -930,7 +953,7 @@ class _PlaylistsPageState extends State<PlaylistsPage>
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
               itemCount: _qqPlaylists.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 12),
+              separatorBuilder: (_, __) => SizedBox(width: 12),
               itemBuilder: (context, i) =>
                   _PlaylistCard(playlist: _qqPlaylists[i]),
             ),
@@ -944,52 +967,49 @@ class _PlaylistsPageState extends State<PlaylistsPage>
   Widget _buildSodaSection() {
     final auth = context.read<AuthState>();
     if (auth.sodaChecking) {
-      return const SizedBox.shrink(); // 检查中不占位，避免闪烁
+      return SizedBox.shrink(); // 检查中不占位，避免闪烁
     }
     if (!auth.sodaLoggedIn) {
       // 未登录：显示「登录汽水音乐同步歌单」按钮
       return GlassCard(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+        padding: EdgeInsets.symmetric(horizontal: 14, vertical: 14),
         borderRadius: 18,
-        color: const Color(0xFF46C9B6).withOpacity(0.14),
+        color: Color(0xFF46C9B6).withOpacity(0.14),
         child: Row(
           children: [
             Icon(
               Icons.water_drop_outlined,
-              color: Colors.white.withOpacity(0.7),
+              color: fgPrimary.withOpacity(0.7),
               size: 22,
             ),
-            const SizedBox(width: 10),
+            SizedBox(width: 10),
             Expanded(
               child: Text(
                 '登录汽水音乐后可同步你的歌单',
                 style: TextStyle(
-                  color: Colors.white.withOpacity(0.7),
+                  color: fgPrimary.withOpacity(0.7),
                   fontSize: 12,
                   height: 1.4,
                 ),
               ),
             ),
-            const SizedBox(width: 8),
+            SizedBox(width: 8),
             GestureDetector(
               onTap: () => showDialog(
                 context: context,
-                builder: (_) => const LoginDialog(source: 'soda'),
+                builder: (_) => LoginDialog(source: 'soda'),
               ),
               child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 6,
-                ),
+                padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                 decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.22),
+                  color: fgPrimary.withOpacity(0.22),
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.white.withOpacity(0.4)),
+                  border: Border.all(color: fgPrimary.withOpacity(0.4)),
                 ),
-                child: const Text(
+                child: Text(
                   '去登录',
                   style: TextStyle(
-                    color: Colors.white,
+                    color: fgPrimary,
                     fontSize: 12,
                     fontWeight: FontWeight.w700,
                   ),
@@ -1007,43 +1027,43 @@ class _PlaylistsPageState extends State<PlaylistsPage>
           children: [
             Icon(
               Icons.library_music,
-              color: Colors.white.withOpacity(0.75),
+              color: fgPrimary.withOpacity(0.75),
               size: 18,
             ),
-            const SizedBox(width: 6),
+            SizedBox(width: 6),
             Text(
               '我的汽水歌单',
               style: TextStyle(
-                color: Colors.white.withOpacity(0.8),
+                color: fgPrimary.withOpacity(0.8),
                 fontSize: 14,
                 fontWeight: FontWeight.w700,
               ),
             ),
-            const SizedBox(width: 8),
+            SizedBox(width: 8),
             // 汽水来源徽标
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.14),
+                color: fgPrimary.withOpacity(0.14),
                 borderRadius: BorderRadius.circular(6),
-                border: Border.all(color: Colors.white.withOpacity(0.25)),
+                border: Border.all(color: fgPrimary.withOpacity(0.25)),
               ),
               child: Text(
                 '汽水',
                 style: TextStyle(
-                  color: Colors.white.withOpacity(0.75),
+                  color: fgPrimary.withOpacity(0.75),
                   fontSize: 10,
                   fontWeight: FontWeight.w600,
                 ),
               ),
             ),
-            const Spacer(),
+            Spacer(),
             if (_sodaLoading)
-              const SizedBox(
+              SizedBox(
                 width: 16,
                 height: 16,
                 child: CircularProgressIndicator(
-                  color: Colors.white70,
+                  color: fgSecondary,
                   strokeWidth: 2,
                 ),
               )
@@ -1052,7 +1072,7 @@ class _PlaylistsPageState extends State<PlaylistsPage>
                 onTap: _loadSodaPlaylists,
                 child: Icon(
                   Icons.refresh,
-                  color: Colors.white.withOpacity(0.6),
+                  color: fgPrimary.withOpacity(0.6),
                   size: 18,
                 ),
               ),
@@ -1062,18 +1082,12 @@ class _PlaylistsPageState extends State<PlaylistsPage>
         if (_sodaError != null)
           Text(
             _sodaError!,
-            style: TextStyle(
-              color: Colors.white.withOpacity(0.5),
-              fontSize: 12,
-            ),
+            style: TextStyle(color: fgPrimary.withOpacity(0.5), fontSize: 12),
           )
         else if (_sodaPlaylists.isEmpty && !_sodaLoading)
           Text(
             '暂无歌单',
-            style: TextStyle(
-              color: Colors.white.withOpacity(0.4),
-              fontSize: 12,
-            ),
+            style: TextStyle(color: fgPrimary.withOpacity(0.4), fontSize: 12),
           )
         else
           SizedBox(
@@ -1099,29 +1113,29 @@ class _PlaylistsPageState extends State<PlaylistsPage>
           _reload();
         },
         child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 10),
+          padding: EdgeInsets.symmetric(vertical: 10),
           decoration: BoxDecoration(
             gradient: selected
                 ? LinearGradient(
                     colors: [
-                      Colors.white.withOpacity(0.22),
-                      Colors.white.withOpacity(0.08),
+                      fgPrimary.withOpacity(0.22),
+                      fgPrimary.withOpacity(0.08),
                     ],
                   )
                 : null,
-            color: selected ? null : Colors.white.withOpacity(0.07),
+            color: selected ? null : fgPrimary.withOpacity(0.07),
             borderRadius: BorderRadius.circular(14),
             border: Border.all(
               color: selected
-                  ? Colors.white.withOpacity(0.35)
-                  : Colors.white.withOpacity(0.14),
+                  ? fgPrimary.withOpacity(0.35)
+                  : fgPrimary.withOpacity(0.14),
             ),
           ),
           child: Center(
             child: Text(
               count > 0 ? '$label ($count)' : label,
               style: TextStyle(
-                color: selected ? Colors.white : Colors.white.withOpacity(0.55),
+                color: selected ? fgPrimary : fgPrimary.withOpacity(0.55),
                 fontSize: 13,
                 fontWeight: FontWeight.w600,
               ),
@@ -1134,7 +1148,7 @@ class _PlaylistsPageState extends State<PlaylistsPage>
 }
 
 /// 稳定渐变色板：按歌单 id 取色，刷新/重进颜色不变
-const _coverPalettes = <List<Color>>[
+final _coverPalettes = <List<Color>>[
   [Color(0xFF6C4FE0), Color(0xFF3A2A80)],
   [Color(0xFFE05A8A), Color(0xFF8A3A5C)],
   [Color(0xFF4FA0E0), Color(0xFF2A5A8A)],
@@ -1160,7 +1174,7 @@ String _firstChar(String name) {
 class _CoverFallback extends StatelessWidget {
   final int id;
   final String name;
-  const _CoverFallback({required this.id, required this.name});
+  _CoverFallback({required this.id, required this.name});
 
   @override
   Widget build(BuildContext context) {
@@ -1178,8 +1192,8 @@ class _CoverFallback extends StatelessWidget {
       alignment: Alignment.center,
       child: Text(
         _firstChar(name),
-        style: const TextStyle(
-          color: Colors.white,
+        style: TextStyle(
+          color: fgPrimary,
           fontSize: 24,
           fontWeight: FontWeight.w700,
         ),
@@ -1230,9 +1244,7 @@ class _PlaylistCardState extends State<_PlaylistCard> {
       // 汽水详情 record 多 creator 字段，与其余音源 record 类型不同，单独处理
       String c;
       if (widget.playlist.source == 'soda') {
-        final s = await ApiService.sodaPlaylistDetail(
-          widget.playlist.detailId,
-        );
+        final s = await ApiService.sodaPlaylistDetail(widget.playlist.detailId);
         c = s.tracks.isNotEmpty ? s.tracks.first.cover : '';
       } else {
         final r = switch (widget.playlist.source) {
@@ -1254,26 +1266,21 @@ class _PlaylistCardState extends State<_PlaylistCard> {
   @override
   Widget build(BuildContext context) {
     final playlist = widget.playlist;
+    // 封面飞入 tag：起点卡片与终点头部拼接规则一致；
+    // 无封面时为 null（两端都不挂 Hero）
+    final String? heroTag = transitionHero.value && _cover.isNotEmpty
+        ? playlistHeroTag(playlist.source, playlist.detailId)
+        : null;
     return GestureDetector(
       onTap: () {
-        Navigator.of(context).push(
-          PageRouteBuilder(
-            opaque: false,
-            transitionDuration: const Duration(milliseconds: 300),
-            pageBuilder: (_, anim, __) => SlideTransition(
-              position: Tween<Offset>(
-                begin: const Offset(0, 1),
-                end: Offset.zero,
-              ).animate(CurvedAnimation(parent: anim, curve: Curves.easeOut)),
-              child: PlaylistDetailPage(
-                id: playlist.detailId,
-                title: playlist.name,
-                cover: _cover,
-                // 酷狗歌单详情走 /kugou/playlist/detail
-                source: playlist.source,
-              ),
-            ),
-          ),
+        pushPlaylistDetail(
+          context,
+          id: playlist.detailId,
+          title: playlist.name,
+          cover: _cover,
+          // 酷狗歌单详情走 /kugou/playlist/detail
+          source: playlist.source,
+          heroTag: heroTag,
         );
       },
       child: SizedBox(
@@ -1287,10 +1294,7 @@ class _PlaylistCardState extends State<_PlaylistCard> {
               height: 110,
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(16),
-                border: Border.all(
-                  color: Colors.white.withOpacity(0.3),
-                  width: 1,
-                ),
+                border: Border.all(color: fgPrimary.withOpacity(0.3), width: 1),
                 boxShadow: [
                   BoxShadow(
                     color: Colors.black.withOpacity(0.25),
@@ -1301,55 +1305,7 @@ class _PlaylistCardState extends State<_PlaylistCard> {
               ),
               child: Stack(
                 children: [
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(16),
-                    child: _cover.isEmpty
-                        ? _CoverFallback(
-                            // 云端歌单（酷狗/QQ/汽水）int id 多为 0，
-                            // 用原始字符串 id 哈希做渐变种子
-                            id: playlist.source == 'netease'
-                                ? playlist.id
-                                : playlist.detailId.hashCode,
-                            name: playlist.name,
-                          )
-                        : CachedNetworkImage(
-                            imageUrl: _cover,
-                            fit: BoxFit.cover,
-                            width: 110,
-                            height: 110,
-                            // p1.music.126.net 拒绝 Dart 默认 UA（403），必须带浏览器 UA
-                            httpHeaders: kImageHttpHeaders,
-                            placeholder: (_, __) => Container(
-                              width: 110,
-                              height: 110,
-                              color: Colors.white.withOpacity(0.10),
-                              child: Center(
-                                child: SizedBox(
-                                  width: 18,
-                                  height: 18,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    valueColor: AlwaysStoppedAnimation(
-                                      Colors.white.withOpacity(0.5),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                            // 加载失败 → 歌单名首字渐变占位（不再用唱片图标）
-                            errorWidget: (context, url, error) {
-                              debugPrint(
-                                '[PlaylistCover] 加载失败 url=$url error=$error',
-                              );
-                              return _CoverFallback(
-                                id: playlist.source == 'netease'
-                                    ? playlist.id
-                                    : playlist.detailId.hashCode,
-                                name: playlist.name,
-                              );
-                            },
-                          ),
-                  ),
+                  _coverWidget(playlist, heroTag),
                   // 云端音源来源徽标（左上角小标签，酷狗/QQ/汽水）
                   if (playlist.source == 'kugou' ||
                       playlist.source == 'qq' ||
@@ -1358,16 +1314,14 @@ class _PlaylistCardState extends State<_PlaylistCard> {
                       left: 6,
                       top: 6,
                       child: Container(
-                        padding: const EdgeInsets.symmetric(
+                        padding: EdgeInsets.symmetric(
                           horizontal: 6,
                           vertical: 2,
                         ),
                         decoration: BoxDecoration(
                           color: Colors.black.withOpacity(0.45),
                           borderRadius: BorderRadius.circular(6),
-                          border: Border.all(
-                            color: Colors.white.withOpacity(0.3),
-                          ),
+                          border: Border.all(color: fgPrimary.withOpacity(0.3)),
                         ),
                         child: Text(
                           switch (playlist.source) {
@@ -1377,7 +1331,7 @@ class _PlaylistCardState extends State<_PlaylistCard> {
                             _ => '',
                           },
                           style: TextStyle(
-                            color: Colors.white,
+                            color: fgPrimary,
                             fontSize: 9,
                             fontWeight: FontWeight.w600,
                           ),
@@ -1387,15 +1341,15 @@ class _PlaylistCardState extends State<_PlaylistCard> {
                 ],
               ),
             ),
-            const SizedBox(height: 6),
+            SizedBox(height: 6),
             SizedBox(
               width: double.infinity,
               child: Text(
                 playlist.name,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: Colors.white,
+                style: TextStyle(
+                  color: fgPrimary,
                   fontSize: 12,
                   fontWeight: FontWeight.w600,
                 ),
@@ -1408,7 +1362,7 @@ class _PlaylistCardState extends State<_PlaylistCard> {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
-                  color: Colors.white.withOpacity(0.45),
+                  color: fgPrimary.withOpacity(0.45),
                   fontSize: 10,
                 ),
               ),
@@ -1417,5 +1371,57 @@ class _PlaylistCardState extends State<_PlaylistCard> {
         ),
       ),
     );
+  }
+
+  /// 卡片封面：圆角裁剪；有 heroTag 时包 Hero（封面飞入起点）
+  Widget _coverWidget(Playlist playlist, String? heroTag) {
+    final clip = ClipRRect(
+      borderRadius: BorderRadius.circular(16),
+      child: _cover.isEmpty
+          ? _CoverFallback(
+              // 云端歌单（酷狗/QQ/汽水）int id 多为 0，
+              // 用原始字符串 id 哈希做渐变种子
+              id: playlist.source == 'netease'
+                  ? playlist.id
+                  : playlist.detailId.hashCode,
+              name: playlist.name,
+            )
+          : CachedNetworkImage(
+              imageUrl: _cover,
+              fit: BoxFit.cover,
+              width: 110,
+              height: 110,
+              // p1.music.126.net 拒绝 Dart 默认 UA（403），必须带浏览器 UA
+              httpHeaders: kImageHttpHeaders,
+              placeholder: (_, __) => Container(
+                width: 110,
+                height: 110,
+                color: fgPrimary.withOpacity(0.10),
+                child: Center(
+                  child: SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation(
+                        fgPrimary.withOpacity(0.5),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              // 加载失败 → 歌单名首字渐变占位（不再用唱片图标）
+              errorWidget: (context, url, error) {
+                debugPrint('[PlaylistCover] 加载失败 url=$url error=$error');
+                return _CoverFallback(
+                  id: playlist.source == 'netease'
+                      ? playlist.id
+                      : playlist.detailId.hashCode,
+                  name: playlist.name,
+                );
+              },
+            ),
+    );
+    return heroTag == null ? clip : Hero(tag: heroTag, child: clip);
   }
 }
